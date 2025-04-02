@@ -1,0 +1,7 @@
+PyQt5
+Pillow
+opencv-python
+numpy
+paddleocr
+langdetect
+llama-cpp-python
