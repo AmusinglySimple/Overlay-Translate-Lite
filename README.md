@@ -20,7 +20,7 @@ Overlay Translate is an offline tool to capture on-screen text, translate it liv
 ## System Requirements
 
 - Windows 10/11
-- Python 3.9 or higher
+- Python 3.8 or higher
 - No GPU required (recommended for faster OCR)
 - Minimum 4 GB RAM (8 GB recommended)
 
