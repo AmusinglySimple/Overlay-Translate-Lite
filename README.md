@@ -93,5 +93,5 @@ Este proyecto es de uso personal. No redistribuir sin permiso del autor original
 
 ## Contacto
 
-Andrea - Master Hobby
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
