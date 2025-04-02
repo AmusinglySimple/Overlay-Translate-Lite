@@ -1,49 +1,110 @@
-🚀 Features
-📸 Capture and translate screen text instantly
+# Overlay Translate
 
-🎥 Real-time live capture
+Overlay Translate is an offline tool to capture on-screen text, translate it live, and display it in a non-intrusive overlay. Ideal for translating content in videos, games, software, or documents without needing an internet connection.
 
-✂️ Snipping tool for custom areas
+---
 
-💡 Enhanced translations with local LLMs
+## Features
 
-🌙 Light and high-contrast themes
+- ✨ Live translations from a floating region
+- 📸 Static screen capture for instant translation
+- 🔍 Offline OCR with PaddleOCR
+- ⚖ Offline translations using LibreTranslate
+- 🔧 Optional enhancement of translations using local LLMs
+- 🌐 Multilingual support with auto-detection
+- ✅ Font, opacity, and contrast customization
+- ✂️ Built-in snipping tool support
 
-📋 Save captures and translated results
+---
 
-🔠 Font and size customization
+## System Requirements
 
-📦 Fully offline (no internet needed)
+- Windows 10/11
+- Python 3.9 or higher
+- No GPU required (recommended for faster OCR)
+- Minimum 4 GB RAM (8 GB recommended)
 
-🖥️ Requirements
-Python 3.8+
+---
 
-Windows 10+
+## Installation
 
-No GPU needed
+1. Clone this repository or copy the files into a folder.
+2. Install dependencies:
 
-⚙️ Installation
-bash
-Copy
-Edit
-git clone https://github.com/your_user/overlay-translate.git
-cd overlay-translate
+```bash
 pip install -r requirements.txt
-Download Phi-3.1-mini-128k-instruct-Q4_K_M.gguf and place it in /models
+```
 
-Make sure libretranslate is available on your system (pip install libretranslate, or binary)
+3. Make sure you have the following:
+   - A GGUF LLM model inside the `models/` folder (e.g. `Phi-3.1-mini-128k-instruct-Q4_K_M.gguf`)
+   - LibreTranslate installed and running on `http://127.0.0.1:5000`
 
-🕹️ Quick Shortcuts
-Action	Key
-Capture and Translate	F1
-Toggle Click-through	F2
-Select Source Language	F3
-Snipping Tool	F4
-Toggle Theme	F5
-Open Local Server	F6
-Quit Application	F7
-Enhanced Translation Toggle	F8
+4. Run the application:
 
-💬 For feedback or questions, contact
+```bash
+python main.py
+```
 
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+---
+
+## Quick Usage
+
+- `F1`: Capture screen and translate
+- `F2`: Toggle click-through on the floating region
+- `F4`: Activate Snipping Tool
+- `F5`: Toggle high-contrast theme
+- `F6`: Open local LibreTranslate server
+- `F8`: Toggle translation enhancement (requires LLM)
+
+Language settings can be configured in the *Settings* menu.
+
+---
+
+## Folder Structure
+
+```
+OverlayTranslate/
+├── main.py                # Entry point of the application
+├── models/                # LLM model folder (GGUF format)
+├── Support/               # Temporary captures and translations
+├── window_positions.json  # Stores UI state and window geometry
+├── requirements.txt       # Python dependencies
+└── ...                    # Additional support files
+```
+
+---
+
+## requirements.txt
+
+```
+PyQt5
+paddleocr
+paddlepaddle>=2.4.2
+opencv-python
+pillow
+requests
+langdetect
+llama-cpp-python
+numpy
+```
+
+---
+
+## Additional Notes
+
+- Captures and translations are stored temporarily in the `Support` folder on your desktop.
+- The LLM model is optional, but improves translation quality.
+- It is strongly recommended to run LibreTranslate locally for full offline functionality.
+
+---
+
+## License
+
+This project is for personal use only. Do not redistribute without permission from the original author.
+
+---
+
+## Contact
+
+Andrea - Master Hobby
+
