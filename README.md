@@ -77,15 +77,16 @@ OverlayTranslate/
 ## requirements.txt
 
 ```
-PyQt5
-paddleocr
-paddlepaddle>=2.4.2
-opencv-python
-pillow
-requests
-langdetect
-llama-cpp-python
-numpy
+PyQt5>=5.15.7
+paddleocr>=2.7.0 # Or latest stable version
+transformers>=4.30.0
+torch>=1.13.0
+Pillow>=9.2.0
+opencv-python>=4.6.0
+langdetect>=1.0.9
+requests>=2.28.1
+libretranslate>=1.5.3
+llama-cpp-python>=0.2.20 # Or latest stable version
 ```
 
 ---
