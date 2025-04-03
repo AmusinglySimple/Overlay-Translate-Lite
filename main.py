@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import json
 import gc
+import platform
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import (
@@ -32,15 +33,56 @@ from llama_cpp import Llama
 # Logging setup
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Define project root directory
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 # Configuration file for window positions and settings
-CONFIG_FILE = os.path.join(os.getcwd(), "window_positions.json")
-MODEL_PATH = os.path.join(os.getcwd(), "models", "Phi-3.1-mini-128k-instruct-Q4_K_M.gguf")
-SUPPORT_FOLDER = os.path.join(os.path.expanduser("~/Desktop"), "Support")
+CONFIG_FILE = os.path.join(PROJECT_ROOT, "window_positions.json")
+MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "Phi-3.1-mini-128k-instruct-Q4_K_M.gguf")
+SUPPORT_FOLDER = os.path.join(PROJECT_ROOT, "Support")
 
 # Global instances
 paddle_ocr = None
 llm = None
 llm_loaded = False
+
+# Function to get system font paths based on OS
+def get_system_font_path(font_name):
+    system = platform.system()
+    font_paths = {
+        "Windows": {
+            "Arial": r"C:\Windows\Fonts\arial.ttf",
+            "MSYH": r"C:\Windows\Fonts\msyh.ttc",  # Microsoft YaHei for Chinese
+            "Malgun": r"C:\Windows\Fonts\malgun.ttf",  # Malgun Gothic for Korean
+        },
+        "Darwin": {  # macOS
+            "Arial": "/Library/Fonts/Arial.ttf",
+            "MSYH": "/System/Library/Fonts/STHeiti Light.ttc",  # Alternative for Chinese
+            "Malgun": "/System/Library/Fonts/AppleGothic.ttf",  # Alternative for Korean
+        },
+        "Linux": {
+            "Arial": "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+            "MSYH": "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Noto Sans CJK for Chinese
+            "Malgun": "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",  # Noto Sans Korean
+        }
+    }
+    
+    default_font = "arial.ttf"  # System fallback font
+    font_map = font_paths.get(system, {})
+    
+    if font_name == "default":
+        font_path = font_map.get("Arial", default_font)
+    elif font_name == "ja" or font_name == "zh":
+        font_path = font_map.get("MSYH", default_font)
+    elif font_name == "ko":
+        font_path = font_map.get("Malgun", default_font)
+    else:
+        font_path = default_font
+
+    if not os.path.exists(font_path):
+        logging.warning(f"Font file not found at {font_path}, using system default: {default_font}")
+        return default_font
+    return font_path
 
 def initialize_paddle_ocr(lang='en'):
     global paddle_ocr
@@ -62,7 +104,7 @@ def load_llm():
         return True
     try:
         if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(f"GGUF model not found at {MODEL_PATH}. Please download Phi-3.1-mini-128k-instruct-Q4_K_M.gguf.")
+            raise FileNotFoundError(f"GGUF model not found at {MODEL_PATH}. Please place Phi-3.1-mini-128k-instruct-Q4_K_M.gguf in the 'models' folder.")
         logging.info(f"Attempting to load LLM from {MODEL_PATH}...")
         llm = Llama(model_path=MODEL_PATH, n_ctx=128000, n_threads=4, verbose=False)
         llm_loaded = True
@@ -129,7 +171,7 @@ class TranslationWorker(QThread):
         self.fonts = fonts
         self.improve_translation = improve_translation
         self.contrast_factor = contrast_factor
-        self.live = live  # Add live flag
+        self.live = live
         self.is_running = True
 
     def preprocess_image(self, image):
@@ -380,7 +422,6 @@ class ControlWindow(QMainWindow):
         self.live_translation_label.setStyleSheet(f"background: #ffffff; border: 2px solid #3498db; border-radius: 5px; padding: 10px; font-size: {self.font_size}px; color: #2c3e50;")
         self.live_translation_label.setVisible(False)
 
-        # Efecto de opacidad para el QLabel en el main window
         self.label_opacity_effect = QGraphicsOpacityEffect(self.live_translation_label)
         self.live_translation_label.setGraphicsEffect(self.label_opacity_effect)
 
@@ -589,7 +630,7 @@ class ControlWindow(QMainWindow):
                 self.label_fade_anim.start()
 
     def initTrayIcon(self):
-        icon_path = r'C:\dev\My app in Python\icon.png'
+        icon_path = os.path.join(PROJECT_ROOT, "assets", "icon.png")
         if os.path.exists(icon_path):
             self.tray_icon = QSystemTrayIcon(QtGui.QIcon(icon_path), self)
             tray_menu = QMenu()
@@ -775,7 +816,7 @@ class ControlWindow(QMainWindow):
 
     def closeApplication(self):
         reply = QMessageBox.question(self, 'Message', 
-                                     "Are you sure to quit? Exiting will delete the 'Support' folder on your desktop containing all captures.",
+                                     "Are you sure to quit? Exiting will delete the 'Support' folder in your project directory containing all captures.",
                                      QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.finalCleanup()
@@ -898,8 +939,7 @@ class ControlWindow(QMainWindow):
     def setDefaultFontType(self):
         font_options = {
             "Arial (Default)": "default",
-            "MS Gothic (Japanese)": "ja",
-            "MS YaHei (Chinese)": "zh",
+            "MS YaHei (Chinese/Japanese)": "zh",
             "Malgun Gothic (Korean)": "ko"
         }
         font, ok = QInputDialog.getItem(self, "Set Default Font Type", "Choose the font for translated text:", sorted(font_options.keys()), 0, False)
@@ -923,15 +963,11 @@ class CaptureWidget(QWidget):
         self.control_window = control_window
         self.target_language = 'en'
         self.fonts = {
-            "default": r"C:\Windows\Fonts\Arial.ttf",
-            "ja": r"C:\Windows\Fonts\msyh.ttc",
-            "zh": r"C:\Windows\Fonts\msyh.ttc",
-            "ko": r"C:\Windows\Fonts\malgun.ttf"
+            "default": get_system_font_path("default"),
+            "ja": get_system_font_path("ja"),
+            "zh": get_system_font_path("zh"),
+            "ko": get_system_font_path("ko")
         }
-        for key, font_path in self.fonts.items():
-            if not os.path.exists(font_path):
-                logging.warning(f"Font file not found: {font_path}, using default")
-                self.fonts[key] = "arial.ttf"
         self.threshold = 5
         self.contrast_factor = 1.0
         self.tempDir = tempfile.mkdtemp(prefix="OverlayTranslate_")
