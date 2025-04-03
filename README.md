@@ -20,7 +20,7 @@ Overlay Translate is an offline tool to capture on-screen text, translate it liv
 ## System Requirements
 
 - Windows 10/11
-- Python 3.8 or higher
+- Python 3.8 
 - No GPU required (recommended for faster OCR)
 - Minimum 4 GB RAM (8 GB recommended)
 
@@ -64,12 +64,13 @@ Language settings can be configured in the *Settings* menu.
 
 ```
 OverlayTranslate/
-├── main.py                # Entry point of the application
-├── models/                # LLM model folder (GGUF format)
-├── Support/               # Temporary captures and translations
-├── window_positions.json  # Stores UI state and window geometry
-├── requirements.txt       # Python dependencies
-└── ...                    # Additional support files
+├── models/
+│   ├── Phi-3.1-mini-128k-instruct-Q4_K_M.gguf
+├── assets/
+│   ├── icon.png
+├── window_positions.json (generated at runtime)
+├── Support/ (generated at runtime)
+└── your_script.py
 ```
 
 ---
