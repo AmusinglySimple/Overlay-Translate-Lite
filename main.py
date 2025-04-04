@@ -39,7 +39,8 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 # Configuration file for window positions and settings
 CONFIG_FILE = os.path.join(PROJECT_ROOT, "window_positions.json")
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "Phi-3.1-mini-128k-instruct-Q4_K_M.gguf")
-SUPPORT_FOLDER = os.path.join(PROJECT_ROOT, "Support")
+# Define Support folder on Desktop
+SUPPORT_FOLDER = os.path.join(os.path.expanduser("~/Desktop"), "Support")
 
 # Global instances
 paddle_ocr = None
@@ -511,26 +512,24 @@ class ControlWindow(QMainWindow):
             self.capture_widget.default_font_type = self.default_font_type
 
     def createMenuBar(self):
-        menu_bar = QtWidgets.QMenuBar(self)
-        file_menu = menu_bar.addMenu("File")
-        file_menu.addAction("Save Capture", self.capture_widget.saveCapture)
-        file_menu.addAction("Save Translation", self.capture_widget.saveTranslation)
-        file_menu.addAction("Minimize to Tray", self.minimizeToTray)
-        file_menu.addAction("Exit", self.closeApplication)
-        settings_menu = menu_bar.addMenu("Settings")
-        settings_menu.addAction("Source Language", self.selectSourceLanguage)
-        settings_menu.addAction("Target Language", self.selectTargetLanguage)
-        settings_menu.addAction("Theme", self.toggleHighContrastTheme)
-        settings_menu.addAction("Server", self.openServer)
-        settings_menu.addAction("Toggle Improved Translation", self.toggleImproveTranslation)
-        settings_menu.addAction("Set Default Font Size", self.setDefaultFontSize)
-        settings_menu.addAction("Set Default Font Type", self.setDefaultFontType)
-        settings_menu.addAction("Load LLM", self.loadLLMAction)
-        settings_menu.addAction("Unload LLM", self.unloadLLMAction)
-        tools_menu = menu_bar.addMenu("Tools")
-        tools_menu.addAction("Chat with LLM", self.openChatWindow)
-        tools_menu.addAction("Pop Out Live Translation", self.popOutLiveTranslation)
-        return menu_bar
+            menu_bar = QtWidgets.QMenuBar(self)
+            file_menu = menu_bar.addMenu("File")
+            file_menu.addAction("Minimize to Tray", self.minimizeToTray)
+            file_menu.addAction("Exit", self.closeApplication)
+            settings_menu = menu_bar.addMenu("Settings")
+            settings_menu.addAction("Source Language", self.selectSourceLanguage)
+            settings_menu.addAction("Target Language", self.selectTargetLanguage)
+            settings_menu.addAction("Theme", self.toggleHighContrastTheme)
+            settings_menu.addAction("Server", self.openServer)
+            settings_menu.addAction("Toggle Improved Translation", self.toggleImproveTranslation)
+            settings_menu.addAction("Set Default Font Size", self.setDefaultFontSize)
+            settings_menu.addAction("Set Default Font Type", self.setDefaultFontType)
+            settings_menu.addAction("Load LLM", self.loadLLMAction)
+            settings_menu.addAction("Unload LLM", self.unloadLLMAction)
+            tools_menu = menu_bar.addMenu("Tools")
+            tools_menu.addAction("Chat with LLM", self.openChatWindow)
+            tools_menu.addAction("Pop Out Live Translation", self.popOutLiveTranslation)
+            return menu_bar
 
     def createButton(self, text, callback, color, hover, pressed):
         button = QPushButton(text, self)
@@ -816,7 +815,7 @@ class ControlWindow(QMainWindow):
 
     def closeApplication(self):
         reply = QMessageBox.question(self, 'Message', 
-                                     "Are you sure to quit? Exiting will delete the 'Support' folder in your project directory containing all captures.",
+                                     "Are you sure to quit? Exiting will delete the 'Support' folder on your Desktop containing all captures.",
                                      QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.finalCleanup()
