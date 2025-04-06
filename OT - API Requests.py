@@ -13,15 +13,18 @@ import json
 import gc
 import platform
 
-from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import (
+from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6.QtWidgets import (
     QDialog, QApplication, QVBoxLayout, QLabel, QMainWindow, QPushButton,
     QInputDialog, QSlider, QMessageBox, QProgressBar, QSystemTrayIcon, QMenu,
-    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QShortcut, QGroupBox
+    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox
 )
-from PyQt5.QtCore import Qt, QPoint, QRect, QRectF, QTimer, QThread, pyqtSignal, QPropertyAnimation
-from PyQt5.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient, QKeySequence
-from PyQt5.QtWidgets import QGraphicsOpacityEffect
+from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation
+from PySide6.QtGui import (
+    QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient, 
+    QKeySequence, QShortcut  # Movemos QShortcut aquí
+)
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from paddleocr import PaddleOCR
@@ -120,7 +123,7 @@ def ensure_support_folder():
 initialize_paddle_ocr('en')
 
 class TranslationWorker(QThread):
-    translation_complete = pyqtSignal(dict)
+    translation_complete = Signal(dict)
 
     def __init__(self, file_name, source_language, target_language, fonts, improve_translation=False, contrast_factor=1.0, live=False, parent=None):
         super().__init__(parent)
@@ -348,7 +351,7 @@ class ControlWindow(QMainWindow):
 
     def showIntroDialog(self):
         intro_dialog = IntroDialog(self)
-        intro_dialog.exec_()
+        intro_dialog.exec()
 
     def initUI(self):
         self.setWindowTitle('Overlay Translate')
@@ -618,7 +621,7 @@ class ControlWindow(QMainWindow):
             logging.warning(f"Tray icon not found at {icon_path}")
 
     def trayIconActivated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.restoreFromTray()
 
     def minimizeToTray(self):
@@ -627,7 +630,7 @@ class ControlWindow(QMainWindow):
             self.tray_icon.showMessage(
                 "Overlay Translate",
                 "The app is still running in the system tray.",
-                QSystemTrayIcon.Information,
+                QSystemTrayIcon.MessageIcon.Information,
                 2000
             )
 
@@ -892,7 +895,7 @@ class ControlWindow(QMainWindow):
             self.live_translation_label.setVisible(True)
 
     def configureAIAPI(self):
-        global ai_api_config  # Declarar global al inicio
+        global ai_api_config
         providers = ["OpenAI (ChatGPT)", "xAI (Grok)", "LM Studio (Local)"]
         provider, ok = QInputDialog.getItem(self, "Select AI Provider", "Choose your AI provider:", providers, 0, False)
         if ok and provider:
@@ -909,9 +912,9 @@ class ControlWindow(QMainWindow):
                 self.saveAPISettings()
 
     def saveAPISettings(self):
-            positions = load_window_positions()
-            positions['ai_api_config'] = ai_api_config
-            save_window_positions(positions)
+        positions = load_window_positions()
+        positions['ai_api_config'] = ai_api_config
+        save_window_positions(positions)
 
     def setDefaultFontSize(self):
         size, ok = QInputDialog.getInt(self, "Set Default Font Size", "Enter font size (10-100):", self.default_font_size, 10, 100)
@@ -1114,7 +1117,7 @@ class CaptureWidget(QWidget):
         self.show()
 
     def mousePressEvent(self, event):
-        self.oldPos = event.globalPos()
+        self.oldPos = event.globalPosition().toPoint()
         self.resizing = self.is_on_border(event.pos())
 
     def mouseMoveEvent(self, event):
@@ -1124,9 +1127,9 @@ class CaptureWidget(QWidget):
                 newHeight = max(event.y(), 100)
                 self.resize(newWidth, newHeight)
             else:
-                delta = QPoint(event.globalPos() - self.oldPos)
+                delta = event.globalPosition().toPoint() - self.oldPos
                 self.move(self.x() + delta.x(), self.y() + delta.y())
-                self.oldPos = event.globalPos()
+                self.oldPos = event.globalPosition().toPoint()
 
     def mouseReleaseEvent(self, event):
         self.resizing = False
@@ -1375,8 +1378,8 @@ class ChatWindow(QDialog):
         event.accept()
 
 class AIStreamingWorker(QThread):
-    text_chunk = pyqtSignal(str)
-    finished = pyqtSignal(str)
+    text_chunk = Signal(str)
+    finished = Signal(str)
 
     def __init__(self, message, original_text, translated_text, source_language, target_language, parent=None):
         super().__init__(parent)
@@ -1442,7 +1445,7 @@ if __name__ == '__main__':
         app = QApplication(sys.argv)
         control_window = ControlWindow()
         control_window.show()
-        sys.exit(app.exec_())
+        sys.exit(app.exec())
     except Exception as e:
         logging.error(f"Application failed to start: {e}")
         print(f"Error: {e}")
