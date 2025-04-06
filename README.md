@@ -69,7 +69,7 @@ OverlayTranslate/
 ├── assets/
 │   ├── icon.png
 ├── window_positions.json (generated at runtime)
-├── Support/ (generated at runtime)
+├── Support/ (generated at runtime on Desktop)
 └── your_script.py
 ```
 
