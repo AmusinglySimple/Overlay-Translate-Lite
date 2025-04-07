@@ -352,6 +352,7 @@ class ControlWindow(QMainWindow):
         self.font_size = 20
         self.improve_translation_enabled = False
         self.initUI()
+        # Move shortcut setup to after UI initialization
         self.setupGlobalShortcuts()
         self.load_geometry()
         ensure_support_folder()
@@ -656,14 +657,15 @@ class ControlWindow(QMainWindow):
         self.capture_widget.setWindowOpacity(opacity)
 
     def setupGlobalShortcuts(self):
-        QShortcut(QKeySequence("F1"), self, activated=self.captureScreen)
-        QShortcut(QKeySequence("F2"), self, activated=self.capture_widget.toggleClickThrough)
-        QShortcut(QKeySequence("F3"), self, activated=self.selectSourceLanguage)
-        QShortcut(QKeySequence("F4"), self, activated=self.activateSnippingTool)
-        QShortcut(QKeySequence("F5"), self, activated=self.toggleHighContrastTheme)
-        QShortcut(QKeySequence("F6"), self, activated=self.openServer)
-        QShortcut(QKeySequence("F7"), self, activated=self.closeApplication)
-        QShortcut(QKeySequence("F8"), self, activated=self.toggleImproveTranslation)
+        # Register shortcuts at the application level
+        self.shortcut_capture = QShortcut(QKeySequence("F1"), QApplication.instance(), self.captureScreen)
+        self.shortcut_toggle = QShortcut(QKeySequence("F2"), QApplication.instance(), self.capture_widget.toggleClickThrough)
+        self.shortcut_source_lang = QShortcut(QKeySequence("F3"), QApplication.instance(), self.selectSourceLanguage)
+        self.shortcut_snip = QShortcut(QKeySequence("F4"), QApplication.instance(), self.activateSnippingTool)
+        self.shortcut_theme = QShortcut(QKeySequence("F5"), QApplication.instance(), self.toggleHighContrastTheme)
+        self.shortcut_server = QShortcut(QKeySequence("F6"), QApplication.instance(), self.openServer)
+        self.shortcut_exit = QShortcut(QKeySequence("F7"), QApplication.instance(), self.closeApplication)
+        self.shortcut_improve = QShortcut(QKeySequence("F8"), QApplication.instance(), self.toggleImproveTranslation)
 
     def selectSourceLanguage(self):
         source_languages = {
@@ -1079,6 +1081,8 @@ class CaptureWidget(QWidget):
     def initUI(self):
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # Enable focus to receive keyboard events
+        self.setFocusPolicy(Qt.StrongFocus)
         self.show()
 
     def start_libretranslate_server(self):
@@ -1223,6 +1227,8 @@ class CaptureWidget(QWidget):
     def mousePressEvent(self, event):
         self.oldPos = event.globalPosition().toPoint()
         self.resizing = self.is_on_border(event.pos())
+        # Accept the event but don't block further processing
+        event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.LeftButton:
@@ -1234,9 +1240,12 @@ class CaptureWidget(QWidget):
                 delta = event.globalPosition().toPoint() - self.oldPos
                 self.move(self.x() + delta.x(), self.y() + delta.y())
                 self.oldPos = event.globalPosition().toPoint()
+            # Accept the event but allow it to propagate
+            event.accept()
 
     def mouseReleaseEvent(self, event):
         self.resizing = False
+        event.accept()
 
     def is_on_border(self, pos):
         return (
