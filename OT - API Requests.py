@@ -17,12 +17,12 @@ from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtWidgets import (
     QDialog, QApplication, QVBoxLayout, QLabel, QMainWindow, QPushButton,
     QInputDialog, QSlider, QMessageBox, QProgressBar, QSystemTrayIcon, QMenu,
-    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox
+    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox, QCheckBox
 )
 from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation
 from PySide6.QtGui import (
     QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient, 
-    QKeySequence, QShortcut  # Movemos QShortcut aquí
+    QKeySequence, QShortcut
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect
 
@@ -91,7 +91,15 @@ def initialize_paddle_ocr(lang='en'):
             del paddle_ocr
             paddle_ocr = None
             gc.collect()
-        paddle_ocr = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=False)
+        paddle_ocr = PaddleOCR(
+            use_angle_cls=True,
+            lang=lang,
+            use_gpu=False,
+            det=True,
+            rec=True,
+            e2e=False,
+            show_log=False
+        )
         logging.info(f"PaddleOCR initialized successfully for language: {lang}")
     except Exception as e:
         logging.error(f"Failed to initialize PaddleOCR: {e}")
@@ -119,7 +127,6 @@ def ensure_support_folder():
         os.makedirs(SUPPORT_FOLDER)
         logging.info(f"Created Support folder at {SUPPORT_FOLDER}")
 
-# Initialize PaddleOCR on startup
 initialize_paddle_ocr('en')
 
 class TranslationWorker(QThread):
@@ -162,10 +169,10 @@ class TranslationWorker(QThread):
                 response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
             elif ai_api_config["provider"] == "xAI":
                 data = {"prompt": prompt, "max_tokens": 512, "temperature": 0.7}
-                response = requests.post("https://api.xai.com/v1/completions", headers=headers, json=data)  # Hypothetical endpoint
+                response = requests.post("https://api.xai.com/v1/completions", headers=headers, json=data)
             elif ai_api_config["provider"] == "LM Studio":
                 data = {"prompt": prompt, "max_tokens": 512, "temperature": 0.7}
-                response = requests.post("http://localhost:1234/v1/completions", headers=headers, json=data)  # LM Studio local endpoint
+                response = requests.post("http://localhost:1234/v1/completions", headers=headers, json=data)
             response.raise_for_status()
             result = response.json()
             improved_text = result.get("choices", [{}])[0].get("text", translated_text).strip()
@@ -532,13 +539,18 @@ class ControlWindow(QMainWindow):
         logging.debug(f"Contrast factor updated to: {contrast_factor}")
 
     def toggleImproveTranslation(self):
+        if not ai_api_config["provider"] or not ai_api_config["api_key"]:
+            QMessageBox.warning(self, "Warning", "Please set an AI API key first in Settings > Configure AI API")
+            self.improve_translation_enabled = False
+            self.improve_translation_toggle.setChecked(False)
+            self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+            return
+            
         self.improve_translation_enabled = not self.improve_translation_enabled
         self.improve_translation_toggle.setText(
             '🔄 Improve Translation: ON' if self.improve_translation_enabled else '🔄 Improve Translation: OFF'
         )
-        if self.improve_translation_enabled and not ai_api_config["provider"]:
-            QMessageBox.warning(self, "Warning", "No AI API configured. Please configure it from Settings > Configure AI API.")
-        elif self.improve_translation_enabled and self.live_capture_timer.isActive():
+        if self.improve_translation_enabled and self.live_capture_timer.isActive():
             QMessageBox.warning(self, "Warning", "Improved translations may cause performance issues during live capture.")
 
     def toggleLiveCapture(self):
@@ -895,21 +907,113 @@ class ControlWindow(QMainWindow):
             self.live_translation_label.setVisible(True)
 
     def configureAIAPI(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configure AI API")
+        dialog.setModal(True)
+        layout = QVBoxLayout()
+
+        # Group box for API selection
+        api_group = QGroupBox("AI API Settings")
+        api_layout = QVBoxLayout()
+
+        # OpenAI settings
+        openai_layout = QHBoxLayout()
+        self.openai_checkbox = QCheckBox("OpenAI (ChatGPT)")
+        self.openai_checkbox.setChecked(ai_api_config["provider"] == "OpenAI")
+        self.openai_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "OpenAI" else "")
+        self.openai_key_input.setEchoMode(QLineEdit.Password)
+        openai_layout.addWidget(self.openai_checkbox)
+        openai_layout.addWidget(self.openai_key_input)
+
+        # xAI settings
+        xai_layout = QHBoxLayout()
+        self.xai_checkbox = QCheckBox("xAI (Grok)")
+        self.xai_checkbox.setChecked(ai_api_config["provider"] == "xAI")
+        self.xai_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "xAI" else "")
+        self.xai_key_input.setEchoMode(QLineEdit.Password)
+        xai_layout.addWidget(self.xai_checkbox)
+        xai_layout.addWidget(self.xai_key_input)
+
+        # LM Studio settings
+        lmstudio_layout = QHBoxLayout()
+        self.lmstudio_checkbox = QCheckBox("LM Studio (Local)")
+        self.lmstudio_checkbox.setChecked(ai_api_config["provider"] == "LM Studio")
+        self.lmstudio_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "LM Studio" else "")
+        self.lmstudio_key_input.setEchoMode(QLineEdit.Password)
+        lmstudio_layout.addWidget(self.lmstudio_checkbox)
+        lmstudio_layout.addWidget(self.lmstudio_key_input)
+
+        # Connect checkboxes to ensure only one is active
+        self.openai_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.openai_checkbox))
+        self.xai_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.xai_checkbox))
+        self.lmstudio_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.lmstudio_checkbox))
+
+        # Add all to layout
+        api_layout.addLayout(openai_layout)
+        api_layout.addLayout(xai_layout)
+        api_layout.addLayout(lmstudio_layout)
+        api_group.setLayout(api_layout)
+        layout.addWidget(api_group)
+
+        # Buttons
+        button_box = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        save_btn.clicked.connect(lambda: self.save_api_settings(dialog))
+        cancel_btn.clicked.connect(dialog.reject)
+        button_box.addWidget(save_btn)
+        button_box.addWidget(cancel_btn)
+        layout.addLayout(button_box)
+
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def ensure_single_active(self, checked_checkbox):
+        """Ensure only one checkbox is checked at a time"""
+        checkboxes = [self.openai_checkbox, self.xai_checkbox, self.lmstudio_checkbox]
+        for checkbox in checkboxes:
+            if checkbox != checked_checkbox and checked_checkbox.isChecked():
+                checkbox.setChecked(False)
+
+    def save_api_settings(self, dialog):
         global ai_api_config
-        providers = ["OpenAI (ChatGPT)", "xAI (Grok)", "LM Studio (Local)"]
-        provider, ok = QInputDialog.getItem(self, "Select AI Provider", "Choose your AI provider:", providers, 0, False)
-        if ok and provider:
-            api_key, ok = QInputDialog.getText(self, "Enter API Key", f"Enter your {provider} API Key:", QLineEdit.Normal, ai_api_config["api_key"] or "")
-            if ok:
-                if provider == "OpenAI (ChatGPT)":
-                    ai_api_config = {"provider": "OpenAI", "api_key": api_key, "endpoint": "https://api.openai.com/v1/chat/completions"}
-                elif provider == "xAI (Grok)":
-                    ai_api_config = {"provider": "xAI", "api_key": api_key, "endpoint": "https://api.xai.com/v1/completions"}
-                elif provider == "LM Studio (Local)":
-                    ai_api_config = {"provider": "LM Studio", "api_key": api_key, "endpoint": "http://localhost:1234/v1/completions"}
-                logging.info(f"AI API configured: {provider}")
-                QMessageBox.information(self, "Success", f"{provider} API configured successfully.")
-                self.saveAPISettings()
+        
+        if self.openai_checkbox.isChecked():
+            api_key = self.openai_key_input.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "Error", "Please enter an API key for OpenAI")
+                return
+            ai_api_config = {"provider": "OpenAI", "api_key": api_key, "endpoint": "https://api.openai.com/v1/chat/completions"}
+            provider_name = "OpenAI (ChatGPT)"
+        elif self.xai_checkbox.isChecked():
+            api_key = self.xai_key_input.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "Error", "Please enter an API key for xAI")
+                return
+            ai_api_config = {"provider": "xAI", "api_key": api_key, "endpoint": "https://api.xai.com/v1/completions"}
+            provider_name = "xAI (Grok)"
+        elif self.lmstudio_checkbox.isChecked():
+            api_key = self.lmstudio_key_input.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "Error", "Please enter an API key for LM Studio")
+                return
+            ai_api_config = {"provider": "LM Studio", "api_key": api_key, "endpoint": "http://localhost:1234/v1/completions"}
+            provider_name = "LM Studio (Local)"
+        else:
+            ai_api_config = {"provider": None, "api_key": None, "endpoint": None}
+            provider_name = "None"
+
+        logging.info(f"AI API configured: {provider_name}")
+        QMessageBox.information(self, "Success", f"{provider_name} API configured successfully.")
+        self.saveAPISettings()
+        
+        # Update improve translation toggle state
+        if not ai_api_config["provider"] and self.improve_translation_enabled:
+            self.improve_translation_enabled = False
+            self.improve_translation_toggle.setChecked(False)
+            self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+        
+        dialog.accept()
 
     def saveAPISettings(self):
         positions = load_window_positions()
