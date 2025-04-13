@@ -3,6 +3,7 @@ import sys
 import time
 import datetime
 import logging
+import logging.handlers
 import requests
 import subprocess
 import webbrowser
@@ -12,19 +13,22 @@ import shutil
 import json
 import gc
 import platform
+import keyring
+import math
 
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtWidgets import (
     QDialog, QApplication, QVBoxLayout, QLabel, QMainWindow, QPushButton,
     QInputDialog, QSlider, QMessageBox, QProgressBar, QSystemTrayIcon, QMenu,
-    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox, QCheckBox
+    QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox, QCheckBox,
+    QColorDialog, QComboBox
 )
-from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation
+from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QPointF
 from PySide6.QtGui import (
-    QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient, 
-    QKeySequence, QShortcut
+    QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient,
+    QKeySequence, QShortcut, QFont, QIcon, QFontDatabase, QPolygonF
 )
-from PySide6.QtWidgets import QGraphicsOpacityEffect
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from paddleocr import PaddleOCR
@@ -33,7 +37,82 @@ import cv2
 import numpy as np
 
 # Logging setup
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+import logging.handlers
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.handlers.RotatingFileHandler('overlay_translate.log', maxBytes=1048576, backupCount=5)  # 1MB file, 5 backups
+    ]
+)
+# Global stylesheet for consistent theme
+GLOBAL_STYLESHEET = """
+    QDialog, QMainWindow {
+        background-color: rgba(20, 20, 20, 200);
+        color: #e0e0e0;
+        font-family: 'Roboto', Arial, sans-serif;
+        border-radius: 15px;
+    }
+    QLabel {
+        color: #00ffcc;
+        font-size: 14px;
+    }
+    QPushButton {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+        color: #ffffff;
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    QPushButton:hover {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5aa1f2, stop:1 #00ffdd);
+    }
+    QPushButton:pressed {
+        background: #357abd;
+        padding-top: 14px;
+        padding-bottom: 10px;
+    }
+    QCheckBox {
+        color: #e0e0e0;
+        font-size: 14px;
+    }
+    QLineEdit {
+        background: rgba(30, 30, 30, 150);
+        color: #e0e0e0;
+        border: 1px solid rgba(255, 255, 255, 20);
+        border-radius: 6px;
+        padding: 8px;
+    }
+    QLineEdit:focus {
+        border: 1px solid #00ffcc;
+    }
+    QGroupBox {
+        color: #00ffcc;
+        font-size: 16px;
+        font-weight: 600;
+        border: 1px solid rgba(255, 255, 255, 20);
+        border-radius: 10px;
+        margin-top: 12px;
+        background: rgba(30, 30, 30, 150);
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 6px 12px;
+        color: #00ffcc;
+    }
+    QTextEdit {
+        background: rgba(30, 30, 30, 150);
+        color: #00ffcc;
+        font-family: 'Roboto Mono', 'Courier New', monospace;
+        font-size: 14px;
+        border: 1px solid rgba(255, 255, 255, 20);
+        border-radius: 10px;
+        padding: 12px;
+    }
+"""
 
 # Define project root directory
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -44,9 +123,8 @@ SUPPORT_FOLDER = os.path.join(os.path.expanduser("~/Desktop"), "Support")
 
 # Global instances
 paddle_ocr = None
-ai_api_config = {"provider": None, "api_key": None, "endpoint": None}
+ai_api_config = {"provider": None, "endpoint": None}
 
-# Function to get system font paths based on OS
 def get_system_font_path(font_name):
     system = platform.system()
     font_paths = {
@@ -54,16 +132,19 @@ def get_system_font_path(font_name):
             "Arial": r"C:\Windows\Fonts\arial.ttf",
             "MSYH": r"C:\Windows\Fonts\msyh.ttc",
             "Malgun": r"C:\Windows\Fonts\malgun.ttf",
+            "Roboto": r"C:\Windows\Fonts\Roboto-Regular.ttf",
         },
         "Darwin": {
             "Arial": "/Library/Fonts/Arial.ttf",
             "MSYH": "/System/Library/Fonts/STHeiti Light.ttc",
             "Malgun": "/System/Library/Fonts/AppleGothic.ttf",
+            "Roboto": "/Library/Fonts/Roboto-Regular.ttf",
         },
         "Linux": {
             "Arial": "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
             "MSYH": "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "Malgun": "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+            "Roboto": "/usr/share/fonts/truetype/roboto/Roboto-Regular.ttf",
         }
     }
     
@@ -71,7 +152,7 @@ def get_system_font_path(font_name):
     font_map = font_paths.get(system, {})
     
     if font_name == "default":
-        font_path = font_map.get("Arial", default_font)
+        font_path = font_map.get("Roboto", font_map.get("Arial", default_font))
     elif font_name == "ja" or font_name == "zh":
         font_path = font_map.get("MSYH", default_font)
     elif font_name == "ko":
@@ -154,11 +235,16 @@ class TranslationWorker(QThread):
         return Image.fromarray(binary)
 
     def improve_translation_with_ai(self, original_text, translated_text):
-        if not ai_api_config["provider"] or not ai_api_config["api_key"]:
+        if not ai_api_config["provider"]:
             return translated_text
         try:
             prompt = f"Improve this translation for clarity and accuracy:\nOriginal: {original_text}\nInitial Translation: {translated_text}\nTarget Language: {self.target_language}"
-            headers = {"Authorization": f"Bearer {ai_api_config['api_key']}"}
+            headers = {}
+            if ai_api_config["provider"] in ["OpenAI", "LM Studio"]:
+                api_key = keyring.get_password("OverlayTranslate", ai_api_config["provider"])
+                if not api_key:
+                    return translated_text
+                headers = {"Authorization": f"Bearer {api_key}"}
             if ai_api_config["provider"] == "OpenAI":
                 data = {
                     "model": "gpt-3.5-turbo",
@@ -167,15 +253,29 @@ class TranslationWorker(QThread):
                     "temperature": 0.7
                 }
                 response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
-            elif ai_api_config["provider"] == "xAI":
-                data = {"prompt": prompt, "max_tokens": 512, "temperature": 0.7}
-                response = requests.post("https://api.xai.com/v1/completions", headers=headers, json=data)
+            elif ai_api_config["provider"] == "Ollama":
+                data = {
+                    "model": "llama3.2",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "options": {"temperature": 0.7}
+                }
+                response = requests.post(f"{ai_api_config['endpoint'].replace('/api/chat', '')}/api/generate", json=data)
             elif ai_api_config["provider"] == "LM Studio":
-                data = {"prompt": prompt, "max_tokens": 512, "temperature": 0.7}
-                response = requests.post("http://localhost:1234/v1/completions", headers=headers, json=data)
+                data = {
+                    "model": "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 512,
+                    "temperature": 0.7
+                }
+                response = requests.post("http://localhost:1234/v1/chat/completions", headers=headers, json=data)
             response.raise_for_status()
             result = response.json()
-            improved_text = result.get("choices", [{}])[0].get("text", translated_text).strip()
+            if ai_api_config["provider"] == "OpenAI":
+                improved_text = result.get("choices", [{}])[0].get("message", {}).get("content", translated_text).strip()
+            elif ai_api_config["provider"] == "Ollama":
+                improved_text = result.get("response", translated_text).strip()
+            elif ai_api_config["provider"] == "LM Studio":
+                improved_text = result.get("choices", [{}])[0].get("message", {}).get("content", translated_text).strip()
             return improved_text if improved_text else translated_text
         except Exception as e:
             logging.error(f"AI API improvement failed: {e}")
@@ -231,14 +331,24 @@ class TranslationWorker(QThread):
                     translated_text = improved_text if improved_text else translated_text
                 result['translated_text'] = translated_text
 
+                # Ensure translated_lines length matches boxes to avoid out-of-bounds
+                translated_lines = translated_text.split('\n')
+                if len(translated_lines) < len(boxes):
+                    logging.warning(f"Mismatch: {len(translated_lines)} translated lines for {len(boxes)} boxes. Padding with empty strings.")
+                    translated_lines.extend([""] * (len(boxes) - len(translated_lines)))
+                elif len(translated_lines) > len(boxes):
+                    logging.warning(f"Mismatch: {len(translated_lines)} translated lines for {len(boxes)} boxes. Truncating lines.")
+                    translated_lines = translated_lines[:len(boxes)]
+                result['translated_lines'] = translated_lines
+
         except Exception as e:
             logging.error(f"Translation error: {e}")
             result['error_message'] = str(e)
+            raise  # Re-raise to capture the full stack trace
         finally:
             if self.is_running:
                 self.translation_complete.emit(result)
             self.is_running = False
-
     def stop(self):
         self.is_running = False
         self.quit()
@@ -250,22 +360,11 @@ class LiveTranslationWindow(QDialog):
         self.setWindowTitle("Live Translation")
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
         self.setMinimumSize(300, 100)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #fefefe;
-                border: 2px solid #2980b9;
-                border-radius: 10px;
-            }
-            QLabel {
-                color: #111;
-                font-size: 18px;
-                font-family: Arial, sans-serif;
-            }
-        """)
         self.initUI()
         self.load_geometry()
 
     def initUI(self):
+        self.setStyleSheet(GLOBAL_STYLESHEET)
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         self.translation_label = QLabel("", self)
@@ -273,6 +372,12 @@ class LiveTranslationWindow(QDialog):
         self.translation_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         layout.addWidget(self.translation_label)
         self.setLayout(layout)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
 
     def updateTranslation(self, text):
         self.translation_label.setText(text.replace('\n', ' ').strip())
@@ -297,43 +402,86 @@ class LiveTranslationWindow(QDialog):
 class IntroDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🌟 Welcome to Overlay Translate! 🌟")
+        self.setWindowTitle("🌌 Overlay Translate")
         self.setGeometry(100, 100, 450, 450)
-        self.setStyleSheet("background-color: #f0f0f0; font-family: Arial;")
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet(GLOBAL_STYLESHEET)
         self.initUI()
+        self.raise_()
+        self.activateWindow()
 
     def initUI(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: rgba(20, 20, 20, 200);
+                border-radius: 15px;
+                color: #ffffff;
+                font-family: 'Roboto', Arial, sans-serif;
+            }
+        """)
         layout = QVBoxLayout()
+        layout.setContentsMargins(25, 25, 25, 25)
         intro_label = QLabel(
-            "👋 **Welcome to Overlay Translate!**\n\n"
-            "🚀 Capture and translate screen text offline with ease.\n\n"
-            "✨ **Features:**\n"
-            "1. 📸 Capture text effortlessly\n"
-            "2. 🎥 Real-time live capture\n"
-            "3. 🌐 Offline translations\n"
-            "4. 🎨 High contrast theme\n"
-            "5. 🌎 Multilingual support\n"
-            "6. 💾 Save options\n"
-            "7. ⏲ Adjustable capture timing\n"
-            "8. 💬 Context-aware chat\n"
-            "9. 🚨 Enhanced error feedback\n\n"
-            "Get started now! 🎉"
+            "<h2 style='color: #00ffcc;'>🌌 Welcome to Overlay Translate</h2><br>"
+            "<p style='line-height: 1.6; color: #e0e0e0;'>⚡️ Experience seamless screen text capture and translation with a futuristic edge.</p><br>"
+            "<h3 style='color: #4a90e2;'>🔮 Features:</h3>"
+            "<ul style='line-height: 1.8; color: #b0b0b0;'>"
+            "<li>📷 Instant text capture</li>"
+            "<li>🎥 Real-time translation streams</li>"
+            "<li>🌍 Offline multilingual support</li>"
+            "<li>🖥️ Sleek, modern interface</li>"
+            "<li>💬 AI-powered chat</li>"
+            "<li>💾 Save captures effortlessly</li>"
+            "<li>⚙️ Customizable settings</li>"
+            "</ul><br>"
+            "<p style='text-align: center; color: #00ffcc;'>Dive into the future of translation! 🚀</p>"
         )
         intro_label.setWordWrap(True)
         intro_label.setAlignment(Qt.AlignCenter)
-        intro_label.setStyleSheet("font-size: 14px; padding: 10px; color: #2c3e50;")
-        close_button = QPushButton("Start Using", self)
+        intro_label.setStyleSheet("font-size: 14px;")
+
+        close_button = QPushButton("Launch")
+        icon_path = os.path.join(PROJECT_ROOT, "assets/icons/launch.svg")
+        if os.path.exists(icon_path):
+            close_button.setIcon(QIcon(icon_path))
         close_button.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3498db, stop:1 #2980b9);
-                color: white; border-radius: 8px; padding: 10px; font-size: 14px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+                color: #ffffff;
+                border-radius: 10px;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: 600;
             }
-            QPushButton:hover { background: #2980b9; }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5aa1f2, stop:1 #00ffdd);
+            }
+            QPushButton:pressed {
+                background: #357abd;
+                padding-top: 14px;
+                padding-bottom: 10px;
+            }
         """)
         close_button.clicked.connect(self.accept)
+
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(0, 255, 204, 100))
+        shadow.setOffset(0, 0)
+        close_button.setGraphicsEffect(shadow)
+
         layout.addWidget(intro_label)
         layout.addWidget(close_button)
         self.setLayout(layout)
+
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.animation.setDuration(800)
+        self.animation.setStartValue(0)
+        self.animation.setEndValue(1)
+        self.animation.setEasingCurve(QEasingCurve.InOutQuad)
+        self.animation.start()
 
 class ControlWindow(QMainWindow):
     def __init__(self):
@@ -348,14 +496,13 @@ class ControlWindow(QMainWindow):
         self.showIntroDialog()
         self.capture_widget = CaptureWidget(control_window=self)
         self.snipping_tool = SnippingTool(self.capture_widget)
-        self.high_contrast_theme_enabled = False
         self.font_size = 20
         self.improve_translation_enabled = False
         self.initUI()
-        # Move shortcut setup to after UI initialization
         self.setupGlobalShortcuts()
         self.load_geometry()
         ensure_support_folder()
+        self.startBackgroundAnimation()
 
     def showIntroDialog(self):
         intro_dialog = IntroDialog(self)
@@ -363,26 +510,63 @@ class ControlWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Overlay Translate')
-        self.setStyleSheet("background-color: #ecf0f1; font-family: Arial;")
         flags = Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint
         self.setWindowFlags(flags)
+        self.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1e1e1e, stop:1 #2a2a2a);
+                color: #e0e0e0;
+                font-family: 'Roboto', Arial, sans-serif;
+            }
+            QGroupBox {
+                color: #00ffcc;
+                font-size: 16px;
+                font-weight: 600;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 10px;
+                margin-top: 12px;
+                background: rgba(30, 30, 30, 150);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 6px 12px;
+                color: #00ffcc;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 14px;
+            }
+        """)
 
-        self.capture_btn = self.createButton('📸 Capture / Translate (F1)', self.captureScreen, '#3498db', '#2980b9', '#2471a3')
-        self.live_capture_btn = self.createButton('🎥 Live Capture', self.toggleLiveCapture, '#3498db', '#2980b9', '#2471a3')
-        self.increase_font_btn = self.createButton('🔍 +', self.increaseFontSize, '#2ecc71', '#27ae60', '#229954')
-        self.decrease_font_btn = self.createButton('🔍 -', self.decreaseFontSize, '#e74c3c', '#c0392b', '#a93226')
-        self.toggle_btn = self.createButton('🔁 Click-Through (F2)', self.capture_widget.toggleClickThrough, '#9b59b6', '#8e44ad', '#7d3c98')
-        self.snip_btn = self.createButton('✂️ Snip (F4)', self.activateSnippingTool, '#16a085', '#138d75', '#117a65')
+        self.capture_btn = self.createButton('Capture / Translate (F1)', self.captureScreen, '#4a90e2', '#5aa1f2', '#357abd', 'capture.svg')
+        self.live_capture_btn = self.createButton('Live Capture', self.toggleLiveCapture, '#4a90e2', '#5aa1f2', '#357abd', 'live.svg')
+        self.increase_font_btn = self.createButton('+', self.increaseFontSize, '#2ecc71', '#3edf81', '#27ae60', 'zoom_in.svg')
+        self.decrease_font_btn = self.createButton('-', self.decreaseFontSize, '#e74c3c', '#f75c4c', '#c0392b', 'zoom_out.svg')
+        self.toggle_btn = self.createButton('Click-Through (F2)', self.capture_widget.toggleClickThrough, '#9b59b6', '#ab69c6', '#8e44ad', 'click.svg')
+        self.snip_btn = self.createButton('Snip (F4)', self.activateSnippingTool, '#16a085', '#26b095', '#138d75', 'snip.svg')
+
+        # Adjust button sizes for font increase/decrease
+        self.increase_font_btn.setFixedSize(40, 40)  # Smaller button size
+        self.decrease_font_btn.setFixedSize(40, 40)  # Smaller button size
 
         slider_style = """
             QSlider::groove:horizontal {
-                height: 8px; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #bdc3c7, stop:1 #ecf0f1);
-                border-radius: 4px;
+                height: 6px;
+                background: rgba(255, 255, 255, 20);
+                border-radius: 3px;
             }
             QSlider::handle:horizontal {
-                background: #3498db; width: 16px; height: 16px; border-radius: 8px; margin: -4px 0;
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, stop:0 #ffffff, stop:1 #4a90e2);
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                margin: -5px 0;
             }
-            QSlider::sub-page:horizontal { background: #3498db; }
+            QSlider::sub-page:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a90e2, stop:1 #00ffcc);
+                border-radius: 3px;
+            }
         """
         self.opacity_slider = QSlider(Qt.Horizontal, self)
         self.opacity_slider.setRange(1, 100)
@@ -390,49 +574,50 @@ class ControlWindow(QMainWindow):
         self.opacity_slider.setStyleSheet(slider_style)
         self.opacity_slider.valueChanged.connect(self.adjustCaptureWidgetOpacity)
 
-        self.threshold_slider = QSlider(Qt.Horizontal, self)
-        self.threshold_slider.setRange(0, 50)
-        self.threshold_slider.setValue(5)
-        self.threshold_slider.setStyleSheet(slider_style)
-        self.threshold_slider.valueChanged.connect(self.updateThreshold)
-
-        self.contrast_slider = QSlider(Qt.Horizontal, self)
-        self.contrast_slider.setRange(5, 20)
-        self.contrast_slider.setValue(10)
-        self.contrast_slider.setStyleSheet(slider_style)
-        self.contrast_slider.valueChanged.connect(self.updateContrast)
-
         self.live_translation_label = QLabel("Live translation will appear here...", self)
         self.live_translation_label.setWordWrap(True)
         self.live_translation_label.setAlignment(Qt.AlignCenter)
-        self.live_translation_label.setStyleSheet(f"background: #ffffff; border: 2px solid #3498db; border-radius: 5px; padding: 10px; font-size: {self.font_size}px; color: #2c3e50;")
+        self.live_translation_label.setStyleSheet("""
+            background: rgba(30, 30, 30, 150);
+            border: 1px solid rgba(255, 255, 255, 20);
+            border-radius: 10px;
+            padding: 15px;
+            font-size: 18px;
+            color: #00ffcc;
+        """)
         self.live_translation_label.setVisible(False)
 
         self.label_opacity_effect = QGraphicsOpacityEffect(self.live_translation_label)
         self.live_translation_label.setGraphicsEffect(self.label_opacity_effect)
 
         self.label_fade_anim = QPropertyAnimation(self.label_opacity_effect, b"opacity")
-        self.label_fade_anim.setDuration(500)
+        self.label_fade_anim.setDuration(400)
         self.label_fade_anim.setStartValue(0.0)
         self.label_fade_anim.setEndValue(1.0)
+        self.label_fade_anim.setEasingCurve(QEasingCurve.InOutQuad)
 
         self.translation_progress_bar = QProgressBar(self)
         self.translation_progress_bar.setMaximum(100)
         self.translation_progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 2px solid #3498db; border-radius: 5px; text-align: center; background: #ecf0f1; color: #2c3e50;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 6px;
+                background: rgba(30, 30, 30, 150);
+                color: #e0e0e0;
+                text-align: center;
+                font-size: 12px;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3498db, stop:1 #2980b9);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+                border-radius: 5px;
             }
         """)
 
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(12)
 
         capture_group = QGroupBox("Capture Controls")
-        capture_group.setStyleSheet("QGroupBox { font-size: 16px; color: #2c3e50; }")
         capture_layout = QVBoxLayout()
         capture_layout.addWidget(self.capture_btn)
         capture_layout.addWidget(self.live_capture_btn)
@@ -443,32 +628,65 @@ class ControlWindow(QMainWindow):
         main_layout.addWidget(self.live_translation_label)
 
         font_group = QGroupBox("Font Size (Live Translation)")
-        font_group.setStyleSheet("QGroupBox { font-size: 16px; color: #2c3e50; }")
+        font_group.setStyleSheet("""
+            QGroupBox {
+                color: #00ffcc;
+                font-size: 16px;
+                font-weight: 600;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 8px;
+                margin-top: 6px;  /* Further reduced margin */
+                margin-bottom: 0px;  /* Minimize bottom margin */
+                background: rgba(30, 30, 30, 150);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 6px;  /* Further reduced padding */
+                color: #00ffcc;
+            }
+        """)
+        font_group.setMaximumHeight(70)  # Set a maximum height to reduce vertical size
         font_layout = QHBoxLayout()
+        font_layout.setContentsMargins(4, 2, 4, 2)  # Further reduced margins
+        font_layout.setSpacing(4)  # Further reduced spacing between buttons
         font_layout.addWidget(self.increase_font_btn)
         font_layout.addWidget(self.decrease_font_btn)
         font_group.setLayout(font_layout)
         main_layout.addWidget(font_group)
 
         settings_group = QGroupBox("Settings")
-        settings_group.setStyleSheet("QGroupBox { font-size: 16px; color: #2c3e50; }")
         settings_layout = QVBoxLayout()
         settings_layout.addWidget(self.toggle_btn)
         settings_layout.addWidget(QLabel("Opacity:", self))
         settings_layout.addWidget(self.opacity_slider)
-        settings_layout.addWidget(QLabel("Word-Line Threshold:", self))
-        settings_layout.addWidget(self.threshold_slider)
-        settings_layout.addWidget(QLabel("OCR Contrast:", self))
-        settings_layout.addWidget(self.contrast_slider)
-        self.improve_translation_toggle = QPushButton('🔄 Improve Translation: OFF', self)
+        self.improve_translation_toggle = QPushButton('Improve Translation: OFF', self)
         self.improve_translation_toggle.setCheckable(True)
         self.improve_translation_toggle.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e74c3c, stop:1 #c0392b);
-                color: white; border-radius: 8px; padding: 12px; font-size: 14px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #e74c3c, stop:1 #c0392b);
+                color: #ffffff;
+                border-radius: 10px;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: 600;
             }
-            QPushButton:checked { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2ecc71, stop:1 #27ae60); }
-            QPushButton:hover { opacity: 0.9; }
+            QPushButton:hover:!checked {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f75c4c, stop:1 #d1483b);
+                padding: 11px;  /* Subtle padding change for hover effect */
+            }
+            QPushButton:checked {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2ecc71, stop:1 #27ae60);
+            }
+            QPushButton:hover:checked {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3edf81, stop:1 #38bf71);
+                padding: 11px;  /* Subtle padding change for hover effect */
+            }
+            QPushButton:pressed {
+                background: #c0392b;
+                padding-top: 14px;
+                padding-bottom: 10px;
+            }
         """)
         self.improve_translation_toggle.clicked.connect(self.toggleImproveTranslation)
         settings_layout.addWidget(self.improve_translation_toggle)
@@ -496,18 +714,51 @@ class ControlWindow(QMainWindow):
             self.capture_widget.default_font_size = self.default_font_size
             self.capture_widget.default_font_type = self.default_font_type
         if 'ai_api_config' in positions:
-            global ai_api_config
-            ai_api_config = positions['ai_api_config']
+            ai_api_config.update({k: v for k, v in positions['ai_api_config'].items() if k != "api_key"})
+
+    def startBackgroundAnimation(self):
+        self.bg_anim = QPropertyAnimation(self, b"windowOpacity")
+        self.bg_anim.setDuration(10000)
+        self.bg_anim.setStartValue(1.0)
+        self.bg_anim.setEndValue(1.0)
+        self.bg_anim.setLoopCount(-1)
+        self.bg_anim.start()
 
     def createMenuBar(self):
         menu_bar = QtWidgets.QMenuBar(self)
+        menu_bar.setStyleSheet("""
+            QMenuBar {
+                background: rgba(20, 20, 20, 150);
+                color: #00ffcc;
+                font-size: 14px;
+                font-family: 'Roboto', Arial, sans-serif;
+            }
+            QMenuBar::item {
+                padding: 6px 12px;
+            }
+            QMenuBar::item:selected {
+                background: rgba(74, 144, 226, 100);
+            }
+            QMenu {
+                background: rgba(20, 20, 20, 200);
+                color: #e0e0e0;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 8px;
+            }
+            QMenu::item {
+                padding: 6px 25px;
+            }
+            QMenu::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+                color: #ffffff;
+            }
+        """)
         file_menu = menu_bar.addMenu("File")
         file_menu.addAction("Minimize to Tray", self.minimizeToTray)
         file_menu.addAction("Exit", self.closeApplication)
         settings_menu = menu_bar.addMenu("Settings")
         settings_menu.addAction("Source Language", self.selectSourceLanguage)
         settings_menu.addAction("Target Language", self.selectTargetLanguage)
-        settings_menu.addAction("Theme", self.toggleHighContrastTheme)
         settings_menu.addAction("Server", self.openServer)
         settings_menu.addAction("Toggle Improved Translation", self.toggleImproveTranslation)
         settings_menu.addAction("Set Default Font Size", self.setDefaultFontSize)
@@ -518,62 +769,103 @@ class ControlWindow(QMainWindow):
         tools_menu.addAction("Pop Out Live Translation", self.popOutLiveTranslation)
         return menu_bar
 
-    def createButton(self, text, callback, color, hover, pressed):
+    def createButton(self, text, callback, color, hover, pressed, icon_name):
         button = QPushButton(text, self)
+        icon_path = os.path.join(PROJECT_ROOT, f"assets/icons/{icon_name}")
+        if os.path.exists(icon_path):
+            button.setIcon(QIcon(icon_path))
+            button.setText('')
+        else:
+            logging.warning(f"Icon not found at {icon_path}, using text label: {text}")
         button.clicked.connect(callback)
         button.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {color}, stop:1 {hover});
-                color: white; border-radius: 8px; padding: 12px; font-size: 14px; font-weight: bold;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color}, stop:1 {pressed});
+                color: #ffffff;
+                border-radius: 10px;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: 600;
             }}
-            QPushButton:hover {{ background: {hover}; }}
-            QPushButton:pressed {{ background: {pressed}; }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {hover}, stop:1 {color});
+            }}
+            QPushButton:pressed {{
+                background: {pressed};
+                padding-top: 14px;
+                padding-bottom: 10px;
+            }}
         """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(255, 255, 255, 100))
+        shadow.setOffset(0, 0)
+        button.setGraphicsEffect(shadow)
         return button
 
-    def updateThreshold(self, value):
-        self.capture_widget.threshold = value
-
-    def updateContrast(self, value):
-        contrast_factor = value / 10.0
-        self.capture_widget.contrast_factor = contrast_factor
-        logging.debug(f"Contrast factor updated to: {contrast_factor}")
-
     def toggleImproveTranslation(self):
-        if not ai_api_config["provider"] or not ai_api_config["api_key"]:
-            QMessageBox.warning(self, "Warning", "Please set an AI API key first in Settings > Configure AI API")
+        # Check if live capture is active first
+        if self.live_capture_timer.isActive():
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Warning")
+            msg_box.setText("Improved translations cannot be enabled during live capture due to performance issues.")
+            msg_box.setStyleSheet(GLOBAL_STYLESHEET)
+            msg_box.exec()
             self.improve_translation_enabled = False
             self.improve_translation_toggle.setChecked(False)
-            self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+            self.improve_translation_toggle.setText('Improve Translation: OFF')
+            self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
+            logging.info("Improved translations disabled due to active live capture")
+            return
+
+        # If live capture is not active, proceed with toggle logic
+        if not ai_api_config["provider"]:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Warning")
+            msg_box.setText("Please set an AI API provider first in Settings > Configure AI API")
+            msg_box.setStyleSheet(GLOBAL_STYLESHEET)
+            msg_box.exec()
+            self.improve_translation_enabled = False
+            self.improve_translation_toggle.setChecked(False)
+            self.improve_translation_toggle.setText('Improve Translation: OFF')
+            self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
             return
             
         self.improve_translation_enabled = not self.improve_translation_enabled
+        self.improve_translation_toggle.setChecked(self.improve_translation_enabled)
         self.improve_translation_toggle.setText(
-            '🔄 Improve Translation: ON' if self.improve_translation_enabled else '🔄 Improve Translation: OFF'
+            'Improve Translation: ON' if self.improve_translation_enabled else 'Improve Translation: OFF'
         )
-        if self.improve_translation_enabled and self.live_capture_timer.isActive():
-            QMessageBox.warning(self, "Warning", "Improved translations may cause performance issues during live capture.")
+        self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
 
     def toggleLiveCapture(self):
         if self.live_capture_timer.isActive():
             self.live_capture_timer.stop()
             if not (self.live_translation_popout and self.live_translation_popout.isVisible()):
                 self.live_translation_label.setVisible(False)
-            self.live_capture_btn.setText('🎥 Live Capture')
+            self.live_capture_btn.setText('Live Capture')
+            icon_path = os.path.join(PROJECT_ROOT, "assets/icons/live.svg")
+            if os.path.exists(icon_path):
+                self.live_capture_btn.setIcon(QIcon(icon_path))
+                self.live_capture_btn.setText('')
             if self.improve_translation_enabled:
                 self.improve_translation_enabled = False
-                self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+                self.improve_translation_toggle.setText('Improve Translation: OFF')
                 QMessageBox.information(self, "Info", "Improved translations disabled during live capture.")
         else:
             if self.improve_translation_enabled:
                 reply = QMessageBox.question(self, "Warning", "Improved translations may cause instability during live capture. Continue?", QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.No:
                     self.improve_translation_enabled = False
-                    self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+                    self.improve_translation_toggle.setText('Improve Translation: OFF')
             self.live_capture_timer.start()
             if not (self.live_translation_popout and self.live_translation_popout.isVisible()):
                 self.live_translation_label.setVisible(True)
-            self.live_capture_btn.setText('🛑 Stop Live Capture')
+            self.live_capture_btn.setText('Stop Live Capture')
+            icon_path = os.path.join(PROJECT_ROOT, "assets/icons/stop.svg")
+            if os.path.exists(icon_path):
+                self.live_capture_btn.setIcon(QIcon(icon_path))
+                self.live_capture_btn.setText('')
 
     def captureScreen(self):
         try:
@@ -623,15 +915,25 @@ class ControlWindow(QMainWindow):
     def initTrayIcon(self):
         icon_path = os.path.join(PROJECT_ROOT, "assets", "icon.png")
         if os.path.exists(icon_path):
-            self.tray_icon = QSystemTrayIcon(QtGui.QIcon(icon_path), self)
+            self.tray_icon = QSystemTrayIcon(QIcon(icon_path), self)
             tray_menu = QMenu()
             tray_menu.addAction("Restore", self.restoreFromTray)
             tray_menu.addAction("Exit", self.closeApplication)
             self.tray_icon.setContextMenu(tray_menu)
+            self.tray_icon.setToolTip("Overlay Translate")
             self.tray_icon.show()
             self.tray_icon.activated.connect(self.trayIconActivated)
+            logging.debug(f"Tray icon initialized with path: {icon_path}")
+            # Test if tray icon is visible
+            self.tray_icon.showMessage(
+                "Overlay Translate",
+                "Tray icon initialized successfully.",
+                QSystemTrayIcon.Information,
+                5000
+            )
         else:
-            logging.warning(f"Tray icon not found at {icon_path}")
+            logging.error(f"Tray icon not found at {icon_path}")
+            self.tray_icon = None
 
     def trayIconActivated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -640,12 +942,29 @@ class ControlWindow(QMainWindow):
     def minimizeToTray(self):
         self.hide()
         if self.tray_icon:
+            logging.debug("Attempting to show tray notification")
+            self.tray_icon.show()
             self.tray_icon.showMessage(
                 "Overlay Translate",
-                "The app is still running in the system tray.",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
+                "Application minimized to system tray. Click the icon to restore.",
+                QSystemTrayIcon.Information,
+                10000
             )
+            logging.debug("Tray notification triggered")
+            # Fallback message if tray notification fails
+            QTimer.singleShot(500, lambda: self.showFallbackMessage())
+        else:
+            logging.error("Tray icon not initialized, cannot show notification")
+            self.showFallbackMessage()
+
+    def showFallbackMessage(self):
+        if not self.isVisible():
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Overlay Translate")
+            msg_box.setText("Application minimized to system tray. Click the tray icon to restore.")
+            msg_box.setStyleSheet(GLOBAL_STYLESHEET)
+            msg_box.exec()
+            logging.debug("Fallback tray message shown")
 
     def restoreFromTray(self):
         self.show()
@@ -657,12 +976,10 @@ class ControlWindow(QMainWindow):
         self.capture_widget.setWindowOpacity(opacity)
 
     def setupGlobalShortcuts(self):
-        # Register shortcuts at the application level
         self.shortcut_capture = QShortcut(QKeySequence("F1"), QApplication.instance(), self.captureScreen)
         self.shortcut_toggle = QShortcut(QKeySequence("F2"), QApplication.instance(), self.capture_widget.toggleClickThrough)
         self.shortcut_source_lang = QShortcut(QKeySequence("F3"), QApplication.instance(), self.selectSourceLanguage)
         self.shortcut_snip = QShortcut(QKeySequence("F4"), QApplication.instance(), self.activateSnippingTool)
-        self.shortcut_theme = QShortcut(QKeySequence("F5"), QApplication.instance(), self.toggleHighContrastTheme)
         self.shortcut_server = QShortcut(QKeySequence("F6"), QApplication.instance(), self.openServer)
         self.shortcut_exit = QShortcut(QKeySequence("F7"), QApplication.instance(), self.closeApplication)
         self.shortcut_improve = QShortcut(QKeySequence("F8"), QApplication.instance(), self.toggleImproveTranslation)
@@ -775,14 +1092,44 @@ class ControlWindow(QMainWindow):
             "Yoruba": "yo",
             "Zulu": "zu",
         }
-        lang, ok = QInputDialog.getItem(self, "Select Source Language", "Choose the language to detect:", sorted(source_languages.keys()), 0, False)
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Select Source Language")
+        dialog.setLabelText("Choose the language to detect:")
+        dialog.setComboBoxItems(sorted(source_languages.keys()))
+        dialog.setStyleSheet(GLOBAL_STYLESHEET + """
+            QComboBox {
+                background: rgba(30, 30, 30, 150);
+                color: #00ffcc;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+            }
+            QComboBox QAbstractItemView {
+                background: rgba(30, 30, 30, 200);
+                color: #00ffcc;
+                selection-background-color: #4a90e2;
+                selection-color: #ffffff;
+            }
+        """)
+        ok = dialog.exec()
+        lang = dialog.textValue()
+        logging.debug(f"Source language dialog returned: lang={lang}, ok={ok}")
         if ok and lang:
             self.source_language = source_languages[lang]
             if self.source_language != 'auto':
                 initialize_paddle_ocr(self.source_language)
             else:
                 initialize_paddle_ocr('en')
+            self.capture_widget.source_language = self.source_language
             logging.info(f"Source language set to: {self.source_language}")
+        else:
+            logging.warning("Source language selection cancelled or invalid")
 
     def selectTargetLanguage(self):
         target_languages = {
@@ -797,19 +1144,71 @@ class ControlWindow(QMainWindow):
             "Japanese": "ja",
             "Korean": "ko",
         }
-        lang, ok = QInputDialog.getItem(self, "Select Target Language", "Choose the language to translate to:", sorted(target_languages.keys()), 0, False)
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Select Target Language")
+        dialog.setLabelText("Choose the language to translate to:")
+        dialog.setComboBoxItems(sorted(target_languages.keys()))
+        dialog.setStyleSheet(GLOBAL_STYLESHEET + """
+            QComboBox {
+                background: rgba(30, 30, 30, 150);
+                color: #00ffcc;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+            }
+            QComboBox QAbstractItemView {
+                background: rgba(30, 30, 30, 200);
+                color: #00ffcc;
+                selection-background-color: #4a90e2;
+                selection-color: #ffffff;
+            }
+        """)
+        ok = dialog.exec()
+        lang = dialog.textValue()
+        logging.debug(f"Target language dialog returned: lang={lang}, ok={ok}")
         if ok and lang:
             self.target_language = target_languages[lang]
             self.capture_widget.target_language = self.target_language
             logging.info(f"Target language set to: {self.target_language}")
+        else:
+            logging.warning("Target language selection cancelled or invalid")
 
     def openServer(self):
         webbrowser.open('http://127.0.0.1:5000/')
 
     def closeApplication(self):
-        reply = QMessageBox.question(self, 'Message', 
-                                     "Are you sure to quit? Exiting will delete the 'Support' folder on your Desktop containing all captures.",
-                                     QMessageBox.Yes | QMessageBox.No)
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Confirm Exit")
+        msg_box.setText("Are you sure to quit? Exiting will delete the 'Support' folder on your Desktop containing all captures.")
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: rgba(30, 30, 30, 200);
+                color: #00ffcc;
+                font-family: 'Roboto', Arial, sans-serif;
+                font-size: 14px;
+            }
+            QMessageBox QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+                color: #ffffff;
+                border-radius: 5px;
+                padding: 8px;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5aa1f2, stop:1 #00ffdd);
+            }
+            QMessageBox QPushButton:pressed {
+                background: #357abd;
+            }
+        """)
+        reply = msg_box.exec()
         if reply == QMessageBox.Yes:
             self.finalCleanup()
             QApplication.quit()
@@ -846,7 +1245,7 @@ class ControlWindow(QMainWindow):
             'size': self.default_font_size,
             'type': self.default_font_type
         }
-        positions['ai_api_config'] = ai_api_config
+        positions['ai_api_config'] = {k: v for k, v in ai_api_config.items() if k != "api_key"}
         save_window_positions(positions)
 
         if hasattr(self, 'translation_worker') and self.translation_worker.isRunning():
@@ -873,29 +1272,41 @@ class ControlWindow(QMainWindow):
         event.ignore()
         self.minimizeToTray()
 
-    def toggleHighContrastTheme(self):
-        self.high_contrast_theme_enabled = not self.high_contrast_theme_enabled
-        self.setStyleSheet("background: black; color: white;" if self.high_contrast_theme_enabled else "background-color: #ecf0f1; font-family: Arial;")
-        self.live_translation_label.setStyleSheet(
-            f"background: {'#333' if self.high_contrast_theme_enabled else '#ffffff'}; border: 2px solid #3498db; border-radius: 5px; padding: 10px; font-size: {self.font_size}px; color: {'#fff' if self.high_contrast_theme_enabled else '#2c3e50'};"
-        )
-
     def activateSnippingTool(self):
         self.capture_widget.hide()
         self.snipping_tool.show()
 
     def openChatWindow(self):
-        self.chat_window = ChatWindow(self.capture_widget.original_text, self.capture_widget.translated_text, self)
-        self.chat_window.show()
+        logging.debug("Opening ChatWindow")
+        try:
+            self.chat_window = ChatWindow(parent=self)
+            self.chat_window.show()
+            logging.debug("ChatWindow shown")
+        except Exception as e:
+            logging.error(f"Failed to open ChatWindow: {e}")
 
     def increaseFontSize(self):
         self.font_size += 2
-        self.live_translation_label.setStyleSheet(f"background: #ffffff; border: 2px solid #3498db; border-radius: 5px; padding: 10px; font-size: {self.font_size}px; color: #2c3e50;")
+        self.live_translation_label.setStyleSheet(f"""
+            background: rgba(30, 30, 30, 150);
+            border: 1px solid rgba(255, 255, 255, 20);
+            border-radius: 10px;
+            padding: 15px;
+            font-size: {self.font_size}px;
+            color: #00ffcc;
+        """)
 
     def decreaseFontSize(self):
         if self.font_size > 10:
             self.font_size -= 2
-            self.live_translation_label.setStyleSheet(f"background: #ffffff; border: 2px solid #3498db; border-radius: 5px; padding: 10px; font-size: {self.font_size}px; color: #2c3e50;")
+            self.live_translation_label.setStyleSheet(f"""
+                background: rgba(30, 30, 30, 150);
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 10px;
+                padding: 15px;
+                font-size: {self.font_size}px;
+                color: #00ffcc;
+            """)
 
     def popOutLiveTranslation(self):
         if self.live_translation_popout is None or not self.live_translation_popout.isVisible():
@@ -912,52 +1323,46 @@ class ControlWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Configure AI API")
         dialog.setModal(True)
+        dialog.setStyleSheet(GLOBAL_STYLESHEET)
         layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        # Group box for API selection
         api_group = QGroupBox("AI API Settings")
         api_layout = QVBoxLayout()
 
-        # OpenAI settings
         openai_layout = QHBoxLayout()
         self.openai_checkbox = QCheckBox("OpenAI (ChatGPT)")
         self.openai_checkbox.setChecked(ai_api_config["provider"] == "OpenAI")
-        self.openai_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "OpenAI" else "")
+        self.openai_key_input = QLineEdit(keyring.get_password("OverlayTranslate", "OpenAI") or "")
         self.openai_key_input.setEchoMode(QLineEdit.Password)
         openai_layout.addWidget(self.openai_checkbox)
         openai_layout.addWidget(self.openai_key_input)
 
-        # xAI settings
-        xai_layout = QHBoxLayout()
-        self.xai_checkbox = QCheckBox("xAI (Grok)")
-        self.xai_checkbox.setChecked(ai_api_config["provider"] == "xAI")
-        self.xai_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "xAI" else "")
-        self.xai_key_input.setEchoMode(QLineEdit.Password)
-        xai_layout.addWidget(self.xai_checkbox)
-        xai_layout.addWidget(self.xai_key_input)
+        ollama_layout = QHBoxLayout()
+        self.ollama_checkbox = QCheckBox("Ollama")
+        self.ollama_checkbox.setChecked(ai_api_config["provider"] == "Ollama")
+        self.ollama_endpoint_input = QLineEdit(ai_api_config["endpoint"] if ai_api_config["provider"] == "Ollama" else "http://localhost:11434")
+        ollama_layout.addWidget(self.ollama_checkbox)
+        ollama_layout.addWidget(self.ollama_endpoint_input)
 
-        # LM Studio settings
         lmstudio_layout = QHBoxLayout()
         self.lmstudio_checkbox = QCheckBox("LM Studio (Local)")
         self.lmstudio_checkbox.setChecked(ai_api_config["provider"] == "LM Studio")
-        self.lmstudio_key_input = QLineEdit(ai_api_config["api_key"] if ai_api_config["provider"] == "LM Studio" else "")
+        self.lmstudio_key_input = QLineEdit(keyring.get_password("OverlayTranslate", "LM Studio") or "")
         self.lmstudio_key_input.setEchoMode(QLineEdit.Password)
         lmstudio_layout.addWidget(self.lmstudio_checkbox)
         lmstudio_layout.addWidget(self.lmstudio_key_input)
 
-        # Connect checkboxes to ensure only one is active
         self.openai_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.openai_checkbox))
-        self.xai_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.xai_checkbox))
+        self.ollama_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.ollama_checkbox))
         self.lmstudio_checkbox.stateChanged.connect(lambda: self.ensure_single_active(self.lmstudio_checkbox))
 
-        # Add all to layout
         api_layout.addLayout(openai_layout)
-        api_layout.addLayout(xai_layout)
+        api_layout.addLayout(ollama_layout)
         api_layout.addLayout(lmstudio_layout)
         api_group.setLayout(api_layout)
         layout.addWidget(api_group)
 
-        # Buttons
         button_box = QHBoxLayout()
         save_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
@@ -971,77 +1376,142 @@ class ControlWindow(QMainWindow):
         dialog.exec()
 
     def ensure_single_active(self, checked_checkbox):
-        """Ensure only one checkbox is checked at a time"""
-        checkboxes = [self.openai_checkbox, self.xai_checkbox, self.lmstudio_checkbox]
+        checkboxes = [self.openai_checkbox, self.ollama_checkbox, self.lmstudio_checkbox]
         for checkbox in checkboxes:
             if checkbox != checked_checkbox and checked_checkbox.isChecked():
                 checkbox.setChecked(False)
 
     def save_api_settings(self, dialog):
-        global ai_api_config
-        
         if self.openai_checkbox.isChecked():
             api_key = self.openai_key_input.text().strip()
             if not api_key:
                 QMessageBox.warning(self, "Error", "Please enter an API key for OpenAI")
                 return
-            ai_api_config = {"provider": "OpenAI", "api_key": api_key, "endpoint": "https://api.openai.com/v1/chat/completions"}
+            ai_api_config.update({"provider": "OpenAI", "endpoint": "https://api.openai.com/v1/chat/completions"})
+            keyring.set_password("OverlayTranslate", "OpenAI", api_key)
             provider_name = "OpenAI (ChatGPT)"
-        elif self.xai_checkbox.isChecked():
-            api_key = self.xai_key_input.text().strip()
-            if not api_key:
-                QMessageBox.warning(self, "Error", "Please enter an API key for xAI")
+        elif self.ollama_checkbox.isChecked():
+            endpoint = self.ollama_endpoint_input.text().strip()
+            if not endpoint:
+                QMessageBox.warning(self, "Error", "Please enter an endpoint for Ollama")
                 return
-            ai_api_config = {"provider": "xAI", "api_key": api_key, "endpoint": "https://api.xai.com/v1/completions"}
-            provider_name = "xAI (Grok)"
+            ai_api_config.update({"provider": "Ollama", "endpoint": f"{endpoint.rstrip('/')}/api/chat"})
+            keyring.set_password("OverlayTranslate", "Ollama", "")  # No API key needed
+            provider_name = "Ollama"
         elif self.lmstudio_checkbox.isChecked():
             api_key = self.lmstudio_key_input.text().strip()
             if not api_key:
                 QMessageBox.warning(self, "Error", "Please enter an API key for LM Studio")
                 return
-            ai_api_config = {"provider": "LM Studio", "api_key": api_key, "endpoint": "http://localhost:1234/v1/completions"}
+            ai_api_config.update({"provider": "LM Studio", "endpoint": "http://localhost:1234/v1/chat/completions"})
+            keyring.set_password("OverlayTranslate", "LM Studio", api_key)
             provider_name = "LM Studio (Local)"
         else:
-            ai_api_config = {"provider": None, "api_key": None, "endpoint": None}
+            ai_api_config.update({"provider": None, "endpoint": None})
+            for provider in ["OpenAI", "Ollama", "LM Studio"]:
+                keyring.set_password("OverlayTranslate", provider, "")
             provider_name = "None"
 
         logging.info(f"AI API configured: {provider_name}")
-        QMessageBox.information(self, "Success", f"{provider_name} API configured successfully.")
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Success")
+        msg_box.setText(f"{provider_name} API configured successfully.")
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: rgba(30, 30, 30, 200);
+                color: #00ffcc;
+                font-family: 'Roboto', Arial, sans-serif;
+                font-size: 14px;
+            }
+            QMessageBox QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90e2, stop:1 #00ffcc);
+                color: #ffffff;
+                border-radius: 5px;
+                padding: 8px;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5aa1f2, stop:1 #00ffdd);
+            }
+            QMessageBox QPushButton:pressed {
+                background: #357abd;
+            }
+        """)
+        msg_box.exec()
         self.saveAPISettings()
         
-        # Update improve translation toggle state
         if not ai_api_config["provider"] and self.improve_translation_enabled:
             self.improve_translation_enabled = False
             self.improve_translation_toggle.setChecked(False)
-            self.improve_translation_toggle.setText('🔄 Improve Translation: OFF')
+            self.improve_translation_toggle.setText('Improve Translation: OFF')
         
         dialog.accept()
 
     def saveAPISettings(self):
         positions = load_window_positions()
-        positions['ai_api_config'] = ai_api_config
+        positions['ai_api_config'] = {k: v for k, v in ai_api_config.items() if k != "api_key"}
         save_window_positions(positions)
 
     def setDefaultFontSize(self):
-        size, ok = QInputDialog.getInt(self, "Set Default Font Size", "Enter font size (10-100):", self.default_font_size, 10, 100)
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Set Default Font Size")
+        dialog.setLabelText("Enter font size (10-100):")
+        dialog.setIntValue(self.default_font_size)
+        dialog.setIntMinimum(10)
+        dialog.setIntMaximum(100)
+        dialog.setStyleSheet(GLOBAL_STYLESHEET)
+        ok = dialog.exec()
+        size = dialog.intValue()
+        logging.debug(f"Font size dialog returned: size={size}, ok={ok}")
         if ok:
             self.default_font_size = size
             self.capture_widget.default_font_size = size
             logging.info(f"Default font size set to: {size}")
             self.saveFontSettings()
+        else:
+            logging.warning("Font size selection cancelled")
 
     def setDefaultFontType(self):
         font_options = {
-            "Arial (Default)": "default",
+            "Roboto (Default)": "default",
             "MS YaHei (Chinese/Japanese)": "zh",
             "Malgun Gothic (Korean)": "ko"
         }
-        font, ok = QInputDialog.getItem(self, "Set Default Font Type", "Choose the font for translated text:", sorted(font_options.keys()), 0, False)
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Set Default Font Type")
+        dialog.setLabelText("Choose the font for translated text:")
+        dialog.setComboBoxItems(sorted(font_options.keys()))
+        dialog.setStyleSheet(GLOBAL_STYLESHEET + """
+            QComboBox {
+                background: rgba(30, 30, 30, 150);
+                color: #00ffcc;
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+            }
+            QComboBox QAbstractItemView {
+                background: rgba(30, 30, 30, 200);
+                color: #00ffcc;
+                selection-background-color: #4a90e2;
+                selection-color: #ffffff;
+            }
+        """)
+        ok = dialog.exec()
+        font = dialog.textValue()
+        logging.debug(f"Font type dialog returned: font={font}, ok={ok}")
         if ok and font:
             self.default_font_type = font_options[font]
             self.capture_widget.default_font_type = self.default_font_type
             logging.info(f"Default font type set to: {self.default_font_type}")
             self.saveFontSettings()
+        else:
+            logging.warning("Font type selection cancelled")
 
     def saveFontSettings(self):
         positions = load_window_positions()
@@ -1062,8 +1532,8 @@ class CaptureWidget(QWidget):
             "zh": get_system_font_path("zh"),
             "ko": get_system_font_path("ko")
         }
-        self.threshold = 5
-        self.contrast_factor = 1.0
+        self.threshold = 5  # Default value since slider is removed
+        self.contrast_factor = 1.0  # Default value since slider is removed
         self.tempDir = tempfile.mkdtemp(prefix="OverlayTranslate_")
         self.original_text = ""
         self.translated_text = ""
@@ -1081,7 +1551,6 @@ class CaptureWidget(QWidget):
     def initUI(self):
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        # Enable focus to receive keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
         self.show()
 
@@ -1106,14 +1575,12 @@ class CaptureWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setOpacity(0.1)
+        painter.setOpacity(0.3)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 200)))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
-        painter.setPen(QPen(QColor(0, 0, 0), 2))
-        painter.drawRoundedRect(1, 1, self.width() - 2, self.height() - 2, 10, 10)
-        painter.setBrush(QBrush(QColor(0, 0, 0)))
+        painter.setBrush(QBrush(QColor(0, 255, 204, 80)))
+        painter.setPen(QPen(QColor(0, 255, 204), 2))
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 15, 15)
+        painter.setBrush(QBrush(QColor(0, 255, 204)))
         painter.drawRect(self.width() - self.borderRadius, self.height() - self.borderRadius, self.borderRadius, self.borderRadius)
 
     def captureScreen(self):
@@ -1157,68 +1624,68 @@ class CaptureWidget(QWidget):
         self.translated_text = result['translated_text']
         live = result['live']
         fileName = self.translation_worker.file_name
-        image = Image.open(fileName).convert("RGBA")
-        draw = ImageDraw.Draw(image)
 
-        boxes = result['boxes']
-        translated_lines = self.translated_text.split('\n')
-
+        # Save the text file for non-live captures
         if not live:
             timestamp = os.path.basename(fileName).replace("capture_", "").replace(".png", "")
             text_file = os.path.join(SUPPORT_FOLDER, f"text_{timestamp}.txt")
             with open(text_file, 'w', encoding='utf-8') as f:
                 f.write(f"Original Text:\n{self.original_text}\n\nTranslated Text:\n{self.translated_text}")
 
-        if not boxes:
-            font = ImageFont.truetype(self.fonts[self.default_font_type], self.default_font_size)
-            full_text = "No text detected."
-            text_bbox = font.getbbox(full_text)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-            text_x = (image.width - text_width) / 2
-            text_y = (image.height - text_height) / 2
-            gradient = Image.new('RGBA', (text_width + 20, text_height + 20), (0, 0, 0, 0))
-            gradient_draw = ImageDraw.Draw(gradient)
-            gradient_draw.rectangle([(0, 0), (text_width + 20, text_height + 20)], fill=(255, 255, 255, 220))
-            gradient_draw.rectangle([(5, 5), (text_width + 15, text_height + 15)], fill=(180, 200, 255, 180))
-            image.paste(gradient, (int(text_x - 10), int(text_y - 10)), gradient)
-            draw.text((text_x, text_y), full_text, font=font, fill=(0, 0, 255, 255))
+        # Open the custom viewer for non-live captures
+        if not live:
+            viewer = TranslatedImageViewer(
+                fileName,
+                result['boxes'],
+                result['translated_lines'],
+                self.fonts[self.default_font_type],
+                self.default_font_size,
+                self
+            )
+            viewer.exec()
+            # The viewer saves the image when the user clicks "Save"
         else:
-            for i, bbox in enumerate(boxes):
-                if i >= len(translated_lines):
-                    break
-                translated_line = translated_lines[i].strip()
+            # For live captures, save the image directly
+            image = Image.open(fileName).convert("RGBA")
+            draw = ImageDraw.Draw(image)
+            boxes = result['boxes']
+            translated_lines = result['translated_lines']
 
-                font_size = self.default_font_size
-                try:
-                    font = ImageFont.truetype(self.fonts[self.default_font_type], font_size)
-                except Exception as e:
-                    logging.error(f"Font loading failed: {e}, using default")
-                    font = ImageFont.truetype("arial.ttf", font_size)
-
-                text_x = bbox[0]
-                text_y = bbox[1]
-                text_bbox = font.getbbox(translated_line)
+            if not boxes:
+                font = ImageFont.truetype(self.fonts[self.default_font_type], self.default_font_size)
+                full_text = "No text detected."
+                text_bbox = font.getbbox(full_text)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
-
-                gradient = Image.new('RGBA', (int(bbox[2] - bbox[0] + 20), int(bbox[3] - bbox[1] + 20)), (0, 0, 0, 0))
+                text_x = (image.width - text_width) / 2
+                text_y = (image.height - text_height) / 2
+                gradient = Image.new('RGBA', (text_width + 20, text_height + 20), (0, 0, 0, 0))
                 gradient_draw = ImageDraw.Draw(gradient)
-                gradient_draw.rectangle([(0, 0), (bbox[2] - bbox[0] + 20, bbox[3] - bbox[1] + 20)], 
-                                       fill=(255, 255, 255, 220))
-                gradient_draw.rectangle([(5, 5), (bbox[2] - bbox[0] + 15, bbox[3] - bbox[1] + 15)], 
-                                       fill=(180, 200, 255, 180))
-                image.paste(gradient, (int(bbox[0] - 10), int(bbox[1] - 10)), gradient)
+                gradient_draw.rectangle([(0, 0), (text_width + 20, text_height + 20)], fill=(255, 255, 255, 220))
+                gradient_draw.rectangle([(5, 5), (text_width + 15, text_height + 15)], fill=(180, 200, 255, 180))
+                image.paste(gradient, (int(text_x - 10), int(text_y - 10)), gradient)
+                draw.text((text_x, text_y), full_text, font=font, fill=(0, 0, 255, 255))
+            else:
+                for i, bbox in enumerate(boxes):
+                    translated_line = translated_lines[i].strip()
+                    font = ImageFont.truetype(self.fonts[self.default_font_type], self.default_font_size)
+                    text_x = bbox[0]
+                    text_y = bbox[1]
+                    text_bbox = font.getbbox(translated_line)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_height = text_bbox[3] - text_bbox[1]
+                    gradient = Image.new('RGBA', (int(bbox[2] - bbox[0] + 20), int(bbox[3] - bbox[1] + 20)), (0, 0, 0, 0))
+                    gradient_draw = ImageDraw.Draw(gradient)
+                    gradient_draw.rectangle([(0, 0), (bbox[2] - bbox[0] + 20, bbox[3] - bbox[1] + 20)], fill=(255, 255, 255, 220))
+                    gradient_draw.rectangle([(5, 5), (bbox[2] - bbox[0] + 15, bbox[3] - bbox[1] + 15)], fill=(180, 200, 255, 180))
+                    image.paste(gradient, (int(bbox[0] - 10), int(bbox[1] - 10)), gradient)
+                    draw.text((text_x, text_y), translated_line, font=font, fill=(0, 0, 255, 255))
 
-                draw.text((text_x, text_y), translated_line, font=font, fill=(0, 0, 255, 255))
-
-        translated_file_path = fileName.replace('capture_', 'translated_')
-        image.save(translated_file_path, format='PNG', quality=95)
-        self.current_translation_path = translated_file_path
-        if not live:
+            translated_file_path = fileName.replace('capture_', 'translated_')
+            image.save(translated_file_path, format='PNG', quality=95)
+            self.current_translation_path = translated_file_path
             shutil.move(translated_file_path, os.path.join(SUPPORT_FOLDER, os.path.basename(translated_file_path)))
             self.current_translation_path = os.path.join(SUPPORT_FOLDER, os.path.basename(translated_file_path))
-        image.show()
 
     def toggleClickThrough(self):
         self.setWindowFlags(self.windowFlags() ^ Qt.WindowTransparentForInput)
@@ -1227,7 +1694,6 @@ class CaptureWidget(QWidget):
     def mousePressEvent(self, event):
         self.oldPos = event.globalPosition().toPoint()
         self.resizing = self.is_on_border(event.pos())
-        # Accept the event but don't block further processing
         event.accept()
 
     def mouseMoveEvent(self, event):
@@ -1240,7 +1706,6 @@ class CaptureWidget(QWidget):
                 delta = event.globalPosition().toPoint() - self.oldPos
                 self.move(self.x() + delta.x(), self.y() + delta.y())
                 self.oldPos = event.globalPosition().toPoint()
-            # Accept the event but allow it to propagate
             event.accept()
 
     def mouseReleaseEvent(self, event):
@@ -1278,14 +1743,14 @@ class SnippingTool(QWidget):
         self.capture_widget = capture_widget
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setGeometry(QApplication.primaryScreen().geometry())
-        self.setWindowOpacity(0.3)
+        self.setWindowOpacity(0.4)
         self.begin = QPoint()
         self.end = QPoint()
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setPen(QPen(QColor('goldenrod'), 3))
-        painter.setBrush(QColor(0, 255, 0, 128))
+        painter.setPen(QPen(QColor('#00ffcc'), 3))
+        painter.setBrush(QColor(0, 255, 204, 80))
         painter.drawRect(QRect(self.begin, self.end))
 
     def mousePressEvent(self, event):
@@ -1309,86 +1774,59 @@ class SnippingTool(QWidget):
         self.hide()
 
 class ChatWindow(QDialog):
-    def __init__(self, original_text, translated_text, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.original_text = original_text
-        self.translated_text = translated_text
+        logging.debug("ChatWindow.__init__ started")
         self.parent = parent
         self.font_size = 14
-        self.setWindowTitle("Chat with AI")
-        self.initUI()
-        self.load_geometry()
+        self.setWindowTitle("AI Terminal")
+        self.setMinimumSize(400, 300)  # Explicit size to avoid rendering issues
+        try:
+            self.initUI()
+            logging.debug("ChatWindow.__init__ completed")
+        except Exception as e:
+            logging.error(f"ChatWindow.__init__ failed: {e}")
+            raise
 
     def initUI(self):
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #000000;
-                border: 2px solid #00FF00;
-                border-radius: 5px;
-            }
-        """)
+        logging.debug("Initializing ChatWindow UI")
+        self.setStyleSheet(GLOBAL_STYLESHEET)
         layout = QVBoxLayout()
-        
+        layout.setContentsMargins(20, 20, 20, 20)
+
         self.chat_history = QTextEdit(self)
         self.chat_history.setReadOnly(True)
         self.update_chat_history_style()
-        self.chat_history.setTextColor(QtGui.QColor(0, 255, 0))
+        logging.debug("Chat history widget created")
 
         font_size_layout = QHBoxLayout()
-        self.increase_font_btn = QPushButton("+", self)
-        self.decrease_font_btn = QPushButton("-", self)
-        self.increase_font_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #000000;
-                color: #00FF00;
-                font-family: 'Courier New', 'Consolas', monospace;
-                font-size: 14px;
-                border: 1px solid #00FF00;
-                border-radius: 0;
-                padding: 5px 10px;
-                min-width: 40px;
-            }
-            QPushButton:hover { background-color: #003300; }
-            QPushButton:pressed { background-color: #002200; }
-        """)
-        self.decrease_font_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #000000;
-                color: #00FF00;
-                font-family: 'Courier New', 'Consolas', monospace;
-                font-size: 14px;
-                border: 1px solid #00FF00;
-                border-radius: 0;
-                padding: 5px 10px;
-                min-width: 40px;
-            }
-            QPushButton:hover { background-color: #003300; }
-            QPushButton:pressed { background-color: #002200; }
-        """)
+        self.increase_font_btn = QPushButton("+")
+        self.decrease_font_btn = QPushButton("-")
+        icon_path_increase = os.path.join(PROJECT_ROOT, "assets/icons/zoom_in.svg")
+        icon_path_decrease = os.path.join(PROJECT_ROOT, "assets/icons/zoom_out.svg")
+        if os.path.exists(icon_path_increase):
+            self.increase_font_btn.setIcon(QIcon(icon_path_increase))
+            self.increase_font_btn.setText('')
+        if os.path.exists(icon_path_decrease):
+            self.decrease_font_btn.setIcon(QIcon(icon_path_decrease))
+            self.decrease_font_btn.setText('')
         self.increase_font_btn.clicked.connect(self.increaseFontSize)
         self.decrease_font_btn.clicked.connect(self.decreaseFontSize)
         font_size_layout.addWidget(self.increase_font_btn)
         font_size_layout.addWidget(self.decrease_font_btn)
+        logging.debug("Font size buttons added")
 
         self.user_input = QLineEdit(self)
         self.update_user_input_style()
+        logging.debug("User input field created")
 
-        self.send_btn = QPushButton(">", self)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #000000;
-                color: #00FF00;
-                font-family: 'Courier New', 'Consolas', monospace;
-                font-size: 14px;
-                border: 1px solid #00FF00;
-                border-radius: 0;
-                padding: 5px 10px;
-                min-width: 40px;
-            }
-            QPushButton:hover { background-color: #003300; }
-            QPushButton:pressed { background-color: #002200; }
-        """)
+        self.send_btn = QPushButton(">")
+        icon_path_send = os.path.join(PROJECT_ROOT, "assets/icons/send.svg")
+        if os.path.exists(icon_path_send):
+            self.send_btn.setIcon(QIcon(icon_path_send))
+            self.send_btn.setText('')
         self.send_btn.clicked.connect(self.sendMessage)
+        logging.debug("Send button created")
 
         self.user_input.returnPressed.connect(self.sendMessage)
 
@@ -1399,64 +1837,58 @@ class ChatWindow(QDialog):
         input_layout.addWidget(self.send_btn)
         layout.addLayout(input_layout)
         self.setLayout(layout)
+        logging.debug("ChatWindow layout set")
 
     def update_chat_history_style(self):
+        logging.debug(f"Updating chat history style with font size: {self.font_size}")
         self.chat_history.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #000000;
-                color: #00FF00;
-                font-family: 'Courier New', 'Consolas', monospace;
                 font-size: {self.font_size}px;
-                border: none;
-                padding: 10px;
             }}
         """)
 
     def update_user_input_style(self):
+        logging.debug(f"Updating user input style with font size: {self.font_size}")
         self.user_input.setStyleSheet(f"""
             QLineEdit {{
-                background-color: #000000;
-                color: #00FF00;
-                font-family: 'Courier New', 'Consolas', monospace;
                 font-size: {self.font_size}px;
-                border: 1px solid #00FF00;
-                border-radius: 0;
-                padding: 5px;
             }}
-            QLineEdit:focus {{ border: 2px solid #00FF00; }}
         """)
 
     def sendMessage(self):
         user_message = self.user_input.text().strip()
+        logging.debug(f"User input received: '{user_message}'")
         if user_message:
-            self.chat_history.append(f"You: {user_message}")
-            self.chat_history.append("")
+            self.chat_history.append(f"<span style='color: #e0e0e0;'>[You]></span> {user_message}")
+            self.chat_history.append("<span style='color: #00ffcc;'>[AI]></span> ")
+            self.chat_history.moveCursor(QtGui.QTextCursor.End)
             self.user_input.clear()
             self.send_btn.setEnabled(False)
             self.start_streaming_response(user_message)
 
     def start_streaming_response(self, message):
-        if not ai_api_config["provider"] or not ai_api_config["api_key"]:
-            self.chat_history.append("AI: Error: No AI API configured. Please configure it from Settings > Configure AI API.")
+        if not ai_api_config["provider"]:
+            self.chat_history.insertPlainText("Error: No AI API configured. Configure in Settings > Configure AI API.")
+            self.chat_history.append("")
             self.send_btn.setEnabled(True)
             return
-        self.worker = AIStreamingWorker(message, self.original_text, self.translated_text, self.parent.source_language, self.parent.target_language)
+        logging.info(f"Starting streaming response for provider: {ai_api_config['provider']}")
+        self.worker = AIStreamingWorker(message, self.parent.target_language)
         self.worker.text_chunk.connect(self.update_chat_history_in_real_time)
         self.worker.finished.connect(self.on_streaming_finished)
         self.worker.start()
 
     def update_chat_history_in_real_time(self, chunk):
-        current_text = self.chat_history.toPlainText()
-        if current_text.endswith("You: ") or current_text.endswith("\n"):
-            new_text = current_text + "AI: " + chunk
-        else:
-            new_text = current_text + chunk
-        self.chat_history.setText(new_text)
+        if len(chunk) > 200:
+            logging.warning(f"Received excessively long chunk: '{chunk[:50]}...'")
+            return
+        self.chat_history.insertPlainText(chunk)
         self.chat_history.moveCursor(QtGui.QTextCursor.End)
 
     def on_streaming_finished(self, final_text):
-        if not final_text.startswith("Error:"):
-            self.chat_history.append("")
+        if final_text.startswith("Error:"):
+            self.chat_history.insertPlainText(f" {final_text}")
+        self.chat_history.append("")
         self.send_btn.setEnabled(True)
 
     def increaseFontSize(self):
@@ -1489,58 +1921,121 @@ class ChatWindow(QDialog):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.stop()
         event.accept()
-
 class AIStreamingWorker(QThread):
     text_chunk = Signal(str)
     finished = Signal(str)
 
-    def __init__(self, message, original_text, translated_text, source_language, target_language, parent=None):
+    def __init__(self, message, target_language, parent=None):
         super().__init__(parent)
         self.message = message
-        self.original_text = original_text
-        self.translated_text = translated_text
-        self.source_language = source_language
         self.target_language = target_language
         self.is_running = True
+        self.buffer = ""
+        self.min_chunk_size = 50
+        self.sentence_delimiters = ['.', '!', '?', '\n']
+        self.last_full_response = ""
 
     def run(self):
         if not self.is_running or not ai_api_config["provider"]:
             self.finished.emit("Error: No AI API configured.")
             return
         try:
-            prompt = f"Context: Original: {self.original_text}\nTranslated: {self.translated_text}\n\nUser: {self.message}\nProvide a helpful and concise response in {self.target_language}."
-            headers = {"Authorization": f"Bearer {ai_api_config['api_key']}"}
+            prompt = (
+                f"You are a helpful assistant. Provide a concise, friendly response to the following user message in {self.target_language}. "
+                f"Keep it short and relevant to the user's input: '{self.message}'"
+            )
+            logging.debug(f"Constructed prompt: '{prompt}'")
+            headers = {"Content-Type": "application/json"}
+            api_key = keyring.get_password("OverlayTranslate", ai_api_config["provider"])
+            if ai_api_config["provider"] in ["OpenAI", "LM Studio"] and api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
             if ai_api_config["provider"] == "OpenAI":
                 data = {
                     "model": "gpt-3.5-turbo",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 150,
-                    "temperature": 0.7,
+                    "max_tokens": 50,
+                    "temperature": 0.5,
                     "stream": True
                 }
-                response = requests.post(ai_api_config["endpoint"], headers=headers, json=data, stream=True)
-            elif ai_api_config["provider"] == "xAI":
-                data = {"prompt": prompt, "max_tokens": 150, "temperature": 0.7, "stream": True}
-                response = requests.post(ai_api_config["endpoint"], headers=headers, json=data, stream=True)
+                endpoint = ai_api_config["endpoint"]
+                logging.debug(f"OpenAI request data: {json.dumps(data)}")
+                response = requests.post(endpoint, headers=headers, json=data, stream=True)
+            elif ai_api_config["provider"] == "Ollama":
+                data = {
+                    "model": "llama3.2",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": True
+                }
+                endpoint = ai_api_config["endpoint"]
+                logging.debug(f"Ollama request data: {json.dumps(data)}")
+                response = requests.post(endpoint, headers=headers, json=data, stream=True)
             elif ai_api_config["provider"] == "LM Studio":
-                data = {"prompt": prompt, "max_tokens": 150, "temperature": 0.7, "stream": True}
-                response = requests.post(ai_api_config["endpoint"], headers=headers, json=data, stream=True)
+                data = {
+                    "model": "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 50,
+                    "temperature": 0.5,
+                    "stream": True
+                }
+                endpoint = "http://localhost:1234/v1/chat/completions"
+                logging.debug(f"LM Studio request data: {json.dumps(data)}")
+                response = requests.post(endpoint, headers=headers, json=data, stream=True)
+
+            logging.info(f"Sending request to {ai_api_config['provider']} endpoint")
             response.raise_for_status()
             full_response = ""
             for line in response.iter_lines():
                 if not self.is_running:
                     break
                 if line:
-                    decoded_line = line.decode('utf-8')
-                    if decoded_line.startswith("data: "):
-                        chunk = decoded_line[6:]
-                        if chunk != "[DONE]":
-                            json_data = json.loads(chunk)
-                            text_chunk = json_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            if text_chunk:
-                                full_response += text_chunk
-                                self.text_chunk.emit(text_chunk)
-                                time.sleep(0.1)
+                    decoded_line = line.decode('utf-8').strip()
+                    logging.debug(f"Received line: {decoded_line}")
+                    if decoded_line and decoded_line != "[DONE]":
+                        try:
+                            if ai_api_config["provider"] == "OpenAI" and decoded_line.startswith("data: "):
+                                chunk = decoded_line[6:]
+                                if chunk != "[DONE]":
+                                    json_data = json.loads(chunk)
+                                    logging.debug(f"Parsed JSON: {json_data}")
+                                    text_chunk = json_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if text_chunk and isinstance(text_chunk, str):
+                                        logging.debug(f"Valid text chunk: '{text_chunk}'")
+                                        self.buffer += text_chunk
+                                        full_response += text_chunk
+                            elif ai_api_config["provider"] == "Ollama":
+                                json_data = json.loads(decoded_line)
+                                logging.debug(f"Parsed JSON: {json_data}")
+                                if json_data.get("done", False):
+                                    continue  # Skip done messages
+                                text_chunk = json_data.get("message", {}).get("content", "")
+                                if text_chunk and isinstance(text_chunk, str):
+                                    logging.debug(f"Valid text chunk: '{text_chunk}'")
+                                    self.buffer += text_chunk
+                                    full_response += text_chunk
+                            elif ai_api_config["provider"] == "LM Studio" and decoded_line.startswith("data: "):
+                                chunk = decoded_line[6:]
+                                if chunk != "[DONE]":
+                                    json_data = json.loads(chunk)
+                                    logging.debug(f"Parsed JSON: {json_data}")
+                                    text_chunk = json_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if text_chunk and isinstance(text_chunk, str):
+                                        logging.debug(f"Valid text chunk: '{text_chunk}'")
+                                        self.buffer += text_chunk
+                                        full_response += text_chunk
+                            if self.buffer and (any(self.buffer.endswith(delim) for delim in self.sentence_delimiters) or len(self.buffer) >= self.min_chunk_size):
+                                logging.debug(f"Emitting buffer: '{self.buffer}'")
+                                self.text_chunk.emit(self.buffer)
+                                self.buffer = ""
+                                time.sleep(0.3)
+                        except json.JSONDecodeError as e:
+                            logging.error(f"Failed to parse JSON chunk: {e}, chunk: {decoded_line}")
+                        except Exception as e:
+                            logging.error(f"Error processing chunk: {e}, chunk: {decoded_line}")
+            if self.buffer:
+                logging.debug(f"Emitting final buffer: '{self.buffer}'")
+                self.text_chunk.emit(self.buffer)
+            logging.info(f"Streaming complete. Full response: {full_response}")
             self.finished.emit(full_response.strip())
         except Exception as e:
             logging.error(f"AI streaming failed: {e}")
@@ -1553,9 +2048,343 @@ class AIStreamingWorker(QThread):
         self.quit()
         self.wait()
 
+class ColorBarPicker(QWidget):
+    colorChanged = Signal(QColor)
+
+    def __init__(self, initial_color=QColor(255, 255, 255), parent=None):
+        super().__init__(parent)
+        self.setFixedSize(200, 60)  # Width for the bar, height for bar + slider
+        self.color = initial_color
+        self.hue = 0
+        self.saturation = 1.0
+        self.value = 1.0
+        self.setMouseTracking(True)
+        # Initialize UI before updating color to ensure widgets exist
+        self.initUI()
+        self.updateColorFromQColor(initial_color)
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        # Hue bar (clickable gradient)
+        self.hue_bar = QWidget(self)
+        self.hue_bar.setFixedHeight(20)
+        self.hue_bar.mousePressEvent = self.hueBarMousePress
+        self.hue_bar.mouseMoveEvent = self.hueBarMouseMove
+        layout.addWidget(self.hue_bar)
+
+        # Saturation slider
+        self.saturation_slider = QSlider(Qt.Horizontal, self)
+        self.saturation_slider.setRange(0, 100)
+        self.saturation_slider.setValue(int(self.saturation * 100))
+        self.saturation_slider.valueChanged.connect(self.updateSaturation)
+        layout.addWidget(self.saturation_slider)
+
+        self.setLayout(layout)
+
+    def updateColorFromQColor(self, color):
+        h, s, v, _ = color.getHsvF()
+        self.hue = h
+        self.saturation = s
+        self.value = v
+        self.color = color
+        self.saturation_slider.setValue(int(self.saturation * 100))
+        self.update()
+
+    def paintEvent(self, event):
+        with QPainter(self) as painter:
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            # Draw hue bar
+            hue_rect = QRect(0, 0, self.hue_bar.width(), self.hue_bar.height())
+            gradient = QLinearGradient(hue_rect.topLeft(), hue_rect.topRight())
+            for i in range(7):
+                gradient.setColorAt(i / 6.0, QColor.fromHsvF(i / 6.0, 1.0, 1.0))
+            painter.fillRect(hue_rect, gradient)
+
+            # Draw hue marker
+            hue_pos = self.hue * self.hue_bar.width()
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawLine(hue_pos, 0, hue_pos, self.hue_bar.height())
+
+    def hueBarMousePress(self, event):
+        self.updateHueFromMouse(event.pos())
+
+    def hueBarMouseMove(self, event):
+        if event.buttons() & Qt.LeftButton:
+            self.updateHueFromMouse(event.pos())
+
+    def updateHueFromMouse(self, pos):
+        # Map the x position to a hue value (0 to 1)
+        x = max(0, min(pos.x(), self.hue_bar.width()))
+        self.hue = x / self.hue_bar.width()
+        self.updateColor()
+        self.update()
+
+    def updateSaturation(self, value):
+        self.saturation = value / 100.0
+        self.updateColor()
+        self.update()
+
+    def updateColor(self):
+        self.color = QColor.fromHsvF(self.hue, self.saturation, self.value)
+        self.colorChanged.emit(self.color)
+
+    def getColor(self):
+        return self.color
+
+    def setColor(self, color):
+        self.updateColorFromQColor(color)
+        self.colorChanged.emit(self.color)
+
+class TranslatedImageViewer(QDialog):
+    def __init__(self, image_path, boxes, translated_lines, font_path, default_font_size, parent=None):
+        super().__init__(parent)
+        self.image_path = image_path
+        self.boxes = boxes
+        self.translated_lines = translated_lines
+        self.font_path = font_path
+        self.font_size = default_font_size
+
+        # Load saved settings or use defaults
+        positions = load_window_positions()
+        viewer_settings = positions.get('viewer_settings', {})
+        self.font_color = QColor(*viewer_settings.get('font_color', (0, 0, 255, 255)))  # Default: Blue
+        self.bg_color_outer = QColor(*viewer_settings.get('bg_color_outer', (255, 255, 255, 220)))  # Default outer gradient
+        self.bg_color_inner = QColor(*viewer_settings.get('bg_color_inner', (180, 200, 255, 180)))  # Default inner gradient
+        self.font_path = viewer_settings.get('font_path', font_path)  # Default to passed font_path
+        self.font_size = viewer_settings.get('font_size', default_font_size)  # Default to passed font_size
+
+        self.original_image = Image.open(image_path).convert("RGBA")
+        self.setWindowTitle("Translated Image Viewer")
+        self.setStyleSheet(GLOBAL_STYLESHEET)
+        self.initUI()
+        self.adjustDialogSize()
+        self.updateImageDisplay()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Image display
+        self.image_label = QLabel(self)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        layout.addWidget(self.image_label)
+
+        # Controls group
+        controls_group = QGroupBox("Adjust Display")
+        controls_layout = QVBoxLayout()
+
+        # Font selection
+        font_layout = QHBoxLayout()
+        font_label = QLabel("Font:")
+        self.font_combo = QComboBox()
+        font_db = QFontDatabase()
+        # Create a mapping of font family to font path for lookup
+        self.font_family_to_path = {}
+        for font_family in font_db.families():
+            self.font_combo.addItem(font_family)
+            font_lower = font_family.lower()
+            if "roboto" in font_lower:
+                font_path = get_system_font_path("default")
+            elif "ms yah" in font_lower or "heiti" in font_lower:
+                font_path = get_system_font_path("zh")
+            elif "malgun" in font_lower or "gothic" in font_lower:
+                font_path = get_system_font_path("ko")
+            else:
+                system = platform.system()
+                font_paths = {
+                    "Windows": f"C:\\Windows\\Fonts\\{font_family.lower().replace(' ', '')}.ttf",
+                    "Darwin": f"/Library/Fonts/{font_family}.ttf",
+                    "Linux": f"/usr/share/fonts/truetype/{font_family.lower().replace(' ', '')}.ttf"
+                }
+                font_path = font_paths.get(system, "arial.ttf")
+                if not os.path.exists(font_path):
+                    font_path = "arial.ttf"
+            self.font_family_to_path[font_family] = font_path
+
+        # Find the font family that matches the loaded font_path
+        selected_family = None
+        for family, path in self.font_family_to_path.items():
+            if path == self.font_path:
+                selected_family = family
+                break
+        if selected_family:
+            self.font_combo.setCurrentText(selected_family)
+        else:
+            self.font_combo.setCurrentText("Arial")
+            self.font_path = "arial.ttf"
+
+        self.font_combo.currentTextChanged.connect(self.updateFont)
+        font_layout.addWidget(font_label)
+        font_layout.addWidget(self.font_combo)
+        controls_layout.addLayout(font_layout)
+
+        # Font size controls
+        font_size_layout = QHBoxLayout()
+        font_size_label = QLabel("Font Size:")
+        self.font_size_slider = QSlider(Qt.Horizontal)
+        self.font_size_slider.setRange(10, 100)
+        self.font_size_slider.setValue(self.font_size)
+        self.font_size_slider.valueChanged.connect(self.updateFontSize)
+        font_size_layout.addWidget(font_size_label)
+        font_size_layout.addWidget(self.font_size_slider)
+        controls_layout.addLayout(font_size_layout)
+
+        # Font color controls
+        font_color_layout = QHBoxLayout()
+        font_color_label = QLabel("Font Color:")
+        self.font_color_picker = ColorBarPicker(self.font_color)
+        self.font_color_picker.colorChanged.connect(self.updateFontColor)
+        font_color_layout.addWidget(font_color_label)
+        font_color_layout.addWidget(self.font_color_picker)
+        controls_layout.addLayout(font_color_layout)
+
+        # Background color controls (outer gradient)
+        bg_color_layout = QHBoxLayout()
+        bg_color_label = QLabel("Background Color:")
+        self.bg_color_picker = ColorBarPicker(self.bg_color_outer)
+        self.bg_color_picker.colorChanged.connect(self.updateBgColor)
+        bg_color_layout.addWidget(bg_color_label)
+        bg_color_layout.addWidget(self.bg_color_picker)
+        controls_layout.addLayout(bg_color_layout)
+
+        controls_group.setLayout(controls_layout)
+        layout.addWidget(controls_group)
+
+        # Save & Close button
+        button_layout = QHBoxLayout()
+        self.save_close_btn = QPushButton("Save & Close")
+        self.save_close_btn.clicked.connect(self.saveAndClose)
+        button_layout.addStretch()
+        button_layout.addWidget(self.save_close_btn)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def adjustDialogSize(self):
+        image_width = self.original_image.width
+        image_height = self.original_image.height
+        controls_height = 200
+        self.setMinimumSize(image_width, image_height + controls_height)
+        self.resize(image_width, image_height + controls_height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.updateImageDisplay()
+
+    def updateFont(self):
+        font_name = self.font_combo.currentText()
+        try:
+            font = QFontDatabase().font(font_name, "", self.font_size)
+            # Update font_path using the mapping
+            self.font_path = self.font_family_to_path.get(font_name, "arial.ttf")
+            if not os.path.exists(self.font_path):
+                self.font_path = "arial.ttf"
+            logging.debug(f"Font updated to: {font_name}, path: {self.font_path}")
+        except Exception as e:
+            self.font_path = "arial.ttf"
+            logging.warning(f"Failed to load font {font_name}: {e}, falling back to Arial")
+        self.updateImageDisplay()
+
+    def updateFontSize(self):
+        self.font_size = self.font_size_slider.value()
+        self.updateImageDisplay()
+
+    def updateFontColor(self, color):
+        self.font_color = color
+        logging.debug(f"Font color updated to: {self.font_color.getRgb()}")
+        self.updateImageDisplay()
+
+    def updateBgColor(self, color):
+        self.bg_color_outer = color
+        r, g, b, a = color.red(), color.green(), color.blue(), color.alpha()
+        self.bg_color_inner = QColor(max(r - 20, 0), max(g - 20, 0), max(b - 20, 0), min(a + 40, 255))
+        logging.debug(f"Background colors updated - outer: {self.bg_color_outer.getRgb()}, inner: {self.bg_color_inner.getRgb()}")
+        self.updateImageDisplay()
+
+    def saveAndClose(self):
+        # Save the current settings
+        positions = load_window_positions()
+        positions['viewer_settings'] = {
+            'font_color': (self.font_color.red(), self.font_color.green(), self.font_color.blue(), self.font_color.alpha()),
+            'bg_color_outer': (self.bg_color_outer.red(), self.bg_color_outer.green(), self.bg_color_outer.blue(), self.bg_color_outer.alpha()),
+            'bg_color_inner': (self.bg_color_inner.red(), self.bg_color_inner.green(), self.bg_color_inner.blue(), self.bg_color_inner.alpha()),
+            'font_path': self.font_path,
+            'font_size': self.font_size
+        }
+        save_window_positions(positions)
+        logging.info("Viewer settings saved successfully.")
+
+        # Save the current rendered image to the Support folder
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_path = os.path.join(SUPPORT_FOLDER, f"translated_{timestamp}.png")
+        self.rendered_image.save(save_path, format='PNG', quality=95)
+        logging.info(f"Saved translated image to: {save_path}")
+        QMessageBox.information(self, "Saved", f"Image saved to:\n{save_path}")
+        self.accept()
+
+    def updateImageDisplay(self):
+        image = self.original_image.copy()
+        draw = ImageDraw.Draw(image)
+
+        # Convert QColor to RGBA tuples for PIL
+        font_color_tuple = (self.font_color.red(), self.font_color.green(), self.font_color.blue(), self.font_color.alpha())
+        bg_color_outer_tuple = (self.bg_color_outer.red(), self.bg_color_outer.green(), self.bg_color_outer.blue(), self.bg_color_outer.alpha())
+        bg_color_inner_tuple = (self.bg_color_inner.red(), self.bg_color_inner.green(), self.bg_color_inner.blue(), self.bg_color_inner.alpha())
+
+        if not self.boxes:
+            font = ImageFont.truetype(self.font_path, self.font_size)
+            full_text = "No text detected."
+            text_bbox = font.getbbox(full_text)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            text_x = (image.width - text_width) / 2
+            text_y = (image.height - text_height) / 2
+            gradient = Image.new('RGBA', (text_width + 20, text_height + 20), (0, 0, 0, 0))
+            gradient_draw = ImageDraw.Draw(gradient)
+            gradient_draw.rectangle([(0, 0), (text_width + 20, text_height + 20)], fill=bg_color_outer_tuple)
+            gradient_draw.rectangle([(5, 5), (text_width + 15, text_height + 15)], fill=bg_color_inner_tuple)
+            image.paste(gradient, (int(text_x - 10), int(text_y - 10)), gradient)
+            draw.text((text_x, text_y), full_text, font=font, fill=font_color_tuple)
+        else:
+            for i, bbox in enumerate(self.boxes):
+                translated_line = self.translated_lines[i].strip()
+
+                font = ImageFont.truetype(self.font_path, self.font_size)
+
+                text_x = bbox[0]
+                text_y = bbox[1]
+                text_bbox = font.getbbox(translated_line)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
+
+                gradient = Image.new('RGBA', (int(bbox[2] - bbox[0] + 20), int(bbox[3] - bbox[1] + 20)), (0, 0, 0, 0))
+                gradient_draw = ImageDraw.Draw(gradient)
+                gradient_draw.rectangle([(0, 0), (bbox[2] - bbox[0] + 20, bbox[3] - bbox[1] + 20)], fill=bg_color_outer_tuple)
+                gradient_draw.rectangle([(5, 5), (bbox[2] - bbox[0] + 15, bbox[3] - bbox[1] + 15)], fill=bg_color_inner_tuple)
+                image.paste(gradient, (int(bbox[0] - 10), int(bbox[1] - 10)), gradient)
+
+                draw.text((text_x, text_y), translated_line, font=font, fill=font_color_tuple)
+
+        # Store the rendered image for saving
+        self.rendered_image = image
+
+        # Convert PIL Image to QPixmap for display
+        image_data = image.convert("RGB").tobytes("raw", "RGB")
+        qimage = QImage(image_data, image.width, image.height, image.width * 3, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimage)
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+                
 if __name__ == '__main__':
     try:
         app = QApplication(sys.argv)
+        app.setFont(QFont("Roboto", 10))
         control_window = ControlWindow()
         control_window.show()
         sys.exit(app.exec())
