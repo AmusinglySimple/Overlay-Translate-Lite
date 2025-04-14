@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QTextEdit, QLineEdit, QFileDialog, QGroupBox, QCheckBox,
     QColorDialog, QComboBox
 )
-from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QPointF
+from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QPointF, QEventLoop
 from PySide6.QtGui import (
     QPixmap, QPainter, QColor, QPen, QBrush, QImage, QLinearGradient,
     QKeySequence, QShortcut, QFont, QIcon, QFontDatabase, QPolygonF
@@ -37,16 +37,24 @@ import cv2
 import numpy as np
 
 # Logging setup
-import logging.handlers
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Console output
-        logging.handlers.RotatingFileHandler('overlay_translate.log', maxBytes=1048576, backupCount=5)  # 1MB file, 5 backups
-    ]
-)
-# Global stylesheet for consistent theme
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# File handler
+file_handler = logging.handlers.RotatingFileHandler('overlay_translate.log', maxBytes=1048576, backupCount=5)
+file_handler.setLevel(logging.DEBUG)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
+
+# Global stylesheet
 GLOBAL_STYLESHEET = """
     QDialog, QMainWindow {
         background-color: rgba(20, 20, 20, 200);
@@ -114,16 +122,12 @@ GLOBAL_STYLESHEET = """
     }
 """
 
-# Define project root directory
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-
-# Configuration file for window positions and settings
 CONFIG_FILE = os.path.join(PROJECT_ROOT, "window_positions.json")
 SUPPORT_FOLDER = os.path.join(os.path.expanduser("~/Desktop"), "Support")
 
-# Global instances
 paddle_ocr = None
-ai_api_config = {"provider": None, "endpoint": None}
+ai_api_config = {"provider": "Ollama", "endpoint": "http://localhost:11434/api/chat"}
 
 def get_system_font_path(font_name):
     system = platform.system()
@@ -208,78 +212,94 @@ def ensure_support_folder():
         os.makedirs(SUPPORT_FOLDER)
         logging.info(f"Created Support folder at {SUPPORT_FOLDER}")
 
-initialize_paddle_ocr('en')
+initialize_paddle_ocr('es')
 
 class TranslationWorker(QThread):
     translation_complete = Signal(dict)
 
-    def __init__(self, file_name, source_language, target_language, fonts, improve_translation=False, contrast_factor=1.0, live=False, parent=None):
+    def __init__(self, file_name, source_language, target_language, fonts, use_translate_with_ai=False, contrast_factor=1.0, live=False, parent=None):
         super().__init__(parent)
         self.file_name = file_name
         self.source_language = source_language
         self.target_language = target_language
         self.fonts = fonts
-        self.improve_translation = improve_translation
+        self.use_translate_with_ai = use_translate_with_ai
         self.contrast_factor = contrast_factor
         self.live = live
         self.is_running = True
 
     def preprocess_image(self, image):
-        if image.width > 1000 or image.height > 1000:
-            image = image.resize((int(image.width / 2), int(image.height / 2)))
-        image = image.convert('RGB')
-        img_array = np.array(image)
-        img_array = cv2.convertScaleAbs(img_array, alpha=self.contrast_factor, beta=0)
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        return Image.fromarray(binary)
-
-    def improve_translation_with_ai(self, original_text, translated_text):
-        if not ai_api_config["provider"]:
-            return translated_text
         try:
-            prompt = f"Improve this translation for clarity and accuracy:\nOriginal: {original_text}\nInitial Translation: {translated_text}\nTarget Language: {self.target_language}"
-            headers = {}
-            if ai_api_config["provider"] in ["OpenAI", "LM Studio"]:
-                api_key = keyring.get_password("OverlayTranslate", ai_api_config["provider"])
-                if not api_key:
-                    return translated_text
-                headers = {"Authorization": f"Bearer {api_key}"}
-            if ai_api_config["provider"] == "OpenAI":
-                data = {
-                    "model": "gpt-3.5-turbo",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 512,
-                    "temperature": 0.7
-                }
-                response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
-            elif ai_api_config["provider"] == "Ollama":
-                data = {
-                    "model": "llama3.2",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "options": {"temperature": 0.7}
-                }
-                response = requests.post(f"{ai_api_config['endpoint'].replace('/api/chat', '')}/api/generate", json=data)
-            elif ai_api_config["provider"] == "LM Studio":
-                data = {
-                    "model": "gpt-3.5-turbo",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 512,
-                    "temperature": 0.7
-                }
-                response = requests.post("http://localhost:1234/v1/chat/completions", headers=headers, json=data)
-            response.raise_for_status()
-            result = response.json()
-            if ai_api_config["provider"] == "OpenAI":
-                improved_text = result.get("choices", [{}])[0].get("message", {}).get("content", translated_text).strip()
-            elif ai_api_config["provider"] == "Ollama":
-                improved_text = result.get("response", translated_text).strip()
-            elif ai_api_config["provider"] == "LM Studio":
-                improved_text = result.get("choices", [{}])[0].get("message", {}).get("content", translated_text).strip()
-            return improved_text if improved_text else translated_text
+            if image.width > 1000 or image.height > 1000:
+                image = image.resize((int(image.width / 2), int(image.height / 2)))
+            image = image.convert('RGB')
+            img_array = np.array(image)
+            img_array = cv2.convertScaleAbs(img_array, alpha=self.contrast_factor, beta=0)
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            return Image.fromarray(binary)
         except Exception as e:
-            logging.error(f"AI API improvement failed: {e}")
+            logging.error(f"Image preprocessing failed: {e}")
+            raise
+
+    def correct_ocr_text(self, text):
+        corrections = {
+            'OpenAl': 'OpenAI',
+            'tngresa': 'ingresa',
+            'seccin': 'sección',
+            'suscripcion': 'suscripción',
+            'CpenAl': 'OpenAI',
+            'ChatGpT': 'ChatGPT',
+            'configuraci6n': 'configuración',
+            'interna*': 'interna',
+            'aplicaciontodo': 'aplicación; todo',
+            'utlizar': 'utilizar',
+            'nive penAl': 'nivel de OpenAI',
+            'CpenAl. .': 'OpenAI.'
+        }
+        for wrong, correct in corrections.items():
+            text = text.replace(wrong, correct)
+        return text
+
+    def translate_with_ai(self, original_text, num_lines):
+        if not ai_api_config["provider"]:
+            logging.warning("No AI API provider configured; returning original text.")
+            return original_text
+        try:
+            worker = AITranslationWorker(original_text, self.source_language, self.target_language, num_lines)
+            translated_text = None
+            error_message = None
+
+            def on_translation_complete(text):
+                nonlocal translated_text
+                translated_text = text
+                logging.debug(f"Received AI translation: '{text}'")
+
+            def on_error(error):
+                nonlocal error_message
+                error_message = error
+                logging.error(f"AI translation error: {error}")
+
+            worker.translation_complete.connect(on_translation_complete)
+            worker.error.connect(on_error)
+
+            loop = QEventLoop()
+            worker.finished.connect(loop.quit)
+            worker.start()
+
+            loop.exec_()
+
+            if error_message:
+                logging.error(f"AI translation failed: {error_message}")
+                return original_text
+            if translated_text is None:
+                logging.error("No translation received from AI worker")
+                return original_text
+            logging.debug(f"Returning AI translated text: '{translated_text}'")
             return translated_text
+        except Exception as e:
+            logging.error(f"AI translation exception: {e}")
+            return original_text
 
     def run(self):
         if not self.is_running:
@@ -289,66 +309,257 @@ class TranslationWorker(QThread):
             if not paddle_ocr:
                 raise Exception("PaddleOCR is not initialized. Check installation and dependencies.")
 
-            image = Image.open(self.file_name)
-            image = self.preprocess_image(image)
-            image_path = self.file_name
+            try:
+                image = Image.open(self.file_name)
+            except Exception as e:
+                raise Exception(f"Failed to load image: {e}")
 
-            ocr_result = paddle_ocr.ocr(image_path, cls=True)
-            if not ocr_result or not ocr_result[0]:
+            try:
+                image = self.preprocess_image(image)
+            except Exception as e:
+                raise Exception(f"Image preprocessing failed: {e}")
+
+            temp_file = self.file_name + "_preprocessed.png"
+            try:
+                image.save(temp_file, format='PNG', quality=95)
+            except Exception as e:
+                raise Exception(f"Failed to save preprocessed image: {e}")
+
+            try:
+                ocr_result = paddle_ocr.ocr(temp_file, cls=True)
+            except Exception as e:
+                logging.error(f"PaddleOCR processing failed: {e}")
                 result['original_text'] = ""
-                result['translated_text'] = "No text detected."
+                result['translated_text'] = "OCR failed."
                 result['boxes'] = []
-            else:
-                lines = []
-                boxes = []
-                for line in ocr_result[0]:
-                    box = line[0]
-                    text = line[1][0]
-                    left = min(box[0][0], box[3][0])
-                    top = min(box[0][1], box[1][1])
-                    right = max(box[1][0], box[2][0])
-                    bottom = max(box[2][1], box[3][1])
-                    lines.append(text)
-                    boxes.append((left, top, right, bottom))
-                original_text = '\n'.join(lines)
-                result['original_text'] = original_text
-                result['boxes'] = boxes
+                result['error_message'] = f"PaddleOCR processing failed: {e}"
+            finally:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception as e:
+                        logging.warning(f"Failed to remove temporary file {temp_file}: {e}")
 
-                source_lang = self.source_language if self.source_language != 'auto' else detect(original_text)
+            if not result['error_message']:
+                if not ocr_result or not ocr_result[0]:
+                    result['original_text'] = ""
+                    result['translated_text'] = "No text detected."
+                    result['boxes'] = []
+                else:
+                    lines = []
+                    boxes = []
+                    for line in ocr_result[0]:
+                        box = line[0]
+                        text = line[1][0]
+                        left = min(box[0][0], box[3][0])
+                        top = min(box[0][1], box[1][1])
+                        right = max(box[1][0], box[2][0])
+                        bottom = max(box[2][1], box[3][1])
+                        lines.append(text)
+                        boxes.append((left, top, right, bottom))
+                    original_text = '\n'.join(lines)
+                    original_text = self.correct_ocr_text(original_text)
+                    result['original_text'] = original_text
+                    result['boxes'] = boxes
 
-                data = {"q": original_text, "source": source_lang, "target": self.target_language, "format": "text"}
-                url = "http://127.0.0.1:5000/translate"
-                try:
-                    response = requests.post(url, data=data, timeout=30)
-                    response.raise_for_status()
-                    translated_text = response.json().get("translatedText", "Translation failed.")
-                except requests.RequestException as e:
-                    logging.error(f"LibreTranslate failed: {e}")
-                    translated_text = "Translation service unavailable."
+                    source_lang = self.source_language if self.source_language != 'auto' else detect(original_text)
 
-                if self.improve_translation:
-                    improved_text = self.improve_translation_with_ai(original_text, translated_text)
-                    translated_text = improved_text if improved_text else translated_text
-                result['translated_text'] = translated_text
+                    translated_text = None
 
-                # Ensure translated_lines length matches boxes to avoid out-of-bounds
-                translated_lines = translated_text.split('\n')
-                if len(translated_lines) < len(boxes):
-                    logging.warning(f"Mismatch: {len(translated_lines)} translated lines for {len(boxes)} boxes. Padding with empty strings.")
-                    translated_lines.extend([""] * (len(boxes) - len(translated_lines)))
-                elif len(translated_lines) > len(boxes):
-                    logging.warning(f"Mismatch: {len(translated_lines)} translated lines for {len(boxes)} boxes. Truncating lines.")
-                    translated_lines = translated_lines[:len(boxes)]
-                result['translated_lines'] = translated_lines
+                    if self.use_translate_with_ai and not self.live:
+                        translated_text = self.translate_with_ai(original_text, len(lines))
+                        logging.debug(f"AI translated_text: '{translated_text}'")
+                        if not translated_text or translated_text in ["No text detected.", original_text]:
+                            logging.warning("AI translation failed or returned no text; falling back to LibreTranslate.")
+                            translated_text = None
+
+                    if translated_text is None:
+                        data = {"q": original_text, "source": source_lang, "target": self.target_language, "format": "text"}
+                        url = "http://127.0.0.1:5000/translate"
+                        try:
+                            response = requests.post(url, data=data, timeout=30)
+                            response.raise_for_status()
+                            translated_text = response.json().get("translatedText", "Translation failed.")
+                        except requests.RequestException as e:
+                            logging.error(f"LibreTranslate failed: {e}")
+                            translated_text = "Translation service unavailable."
+
+                    result['translated_text'] = translated_text if translated_text else "Translation failed."
+                    logging.debug(f"Assigned translated_text to result: '{result['translated_text']}'")
+
+                    translated_lines = translated_text.split('\n') if translated_text else []
+                    logging.debug(f"Raw translated_text: '{translated_text}'")
+                    logging.debug(f"Initial translated_lines: {translated_lines}")
+
+                    if len(translated_lines) != len(boxes):
+                        logging.warning(f"Mismatch: {len(translated_lines)} translated lines for {len(boxes)} boxes.")
+                        if len(translated_lines) < len(boxes):
+                            logging.debug(f"Padding translated_lines with {len(boxes) - len(translated_lines)} empty strings.")
+                            translated_lines.extend([""] * (len(boxes) - len(translated_lines)))
+                        elif len(translated_lines) > len(boxes):
+                            logging.debug(f"Truncating translated_lines from {len(translated_lines)} to {len(boxes)}: discarded {translated_lines[len(boxes):]}")
+                            translated_lines = translated_lines[:len(boxes)]
+
+                    logging.debug(f"Final translated_lines: {translated_lines}")
+                    result['translated_lines'] = translated_lines
 
         except Exception as e:
             logging.error(f"Translation error: {e}")
             result['error_message'] = str(e)
-            raise  # Re-raise to capture the full stack trace
+            result['translated_text'] = "Translation failed due to an error."
+            result['translated_lines'] = []
         finally:
             if self.is_running:
+                logging.debug(f"Emitting result: translated_text='{result['translated_text']}', translated_lines={result['translated_lines']}")
                 self.translation_complete.emit(result)
             self.is_running = False
+
+    def stop(self):
+        self.is_running = False
+        self.quit()
+        self.wait()
+
+class AITranslationWorker(QThread):
+    translation_complete = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, text, source_language, target_language, num_lines, parent=None):
+        super().__init__(parent)
+        self.text = text
+        self.source_language = source_language
+        self.target_language = target_language
+        self.num_lines = num_lines
+        self.is_running = True
+
+    def run(self):
+        if not self.is_running or not ai_api_config["provider"]:
+            self.error.emit("No AI API configured.")
+            return
+        try:
+            lang_map = {
+                "en": "English",
+                "es": "Spanish",
+                "fr": "French",
+                "de": "German",
+                "it": "Italian",
+                "pt": "Portuguese",
+                "ru": "Russian",
+                "zh-cn": "Chinese (Simplified)",
+                "ja": "Japanese",
+                "ko": "Korean"
+            }
+            target_lang_name = lang_map.get(self.target_language, "English")
+            
+            lines = self.text.split('\n')
+            numbered_text = '\n'.join(f"{i+1}. {line}" for i, line in enumerate(lines))
+            prompt = (
+                f"Translate the following text to {target_lang_name}, preserving the exact number of lines ({self.num_lines}). "
+                f"Each line should be a direct translation of the corresponding input line, maintaining the original meaning without paraphrasing. "
+                f"Return the translation in the format '1. translated text', '2. translated text', etc., one per line. "
+                f"If a line is empty, return an empty translation for that line. Ensure exactly {self.num_lines} lines are returned:\n"
+                f"{numbered_text}"
+            )
+            logging.debug(f"Translation prompt: {prompt}")
+
+            headers = {"Content-Type": "application/json"}
+            api_key = keyring.get_password("OverlayTranslate", ai_api_config["provider"])
+            if ai_api_config["provider"] in ["OpenAI", "LM Studio"] and api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            if ai_api_config["provider"] == "OpenAI":
+                data = {
+                    "model": "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max(5000 * self.num_lines, 100),
+                    "temperature": 0.3
+                }
+                endpoint = ai_api_config["endpoint"]
+                response = requests.post(endpoint, headers=headers, json=data)
+            elif ai_api_config["provider"] == "Ollama":
+                data = {
+                    "model": "llama3.2",
+                    "prompt": prompt,
+                    "stream": False
+                }
+                endpoint = ai_api_config["endpoint"].replace('/api/chat', '/api/generate')
+                response = requests.post(endpoint, headers=headers, json=data)
+            elif ai_api_config["provider"] == "LM Studio":
+                data = {
+                    "model": "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max(5000 * self.num_lines, 100),
+                    "temperature": 0.3
+                }
+                endpoint = "http://localhost:1234/v1/chat/completions"
+                response = requests.post(endpoint, headers=headers, json=data)
+
+            response.raise_for_status()
+            result = response.json()
+            
+            if ai_api_config["provider"] == "OpenAI":
+                translated_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            elif ai_api_config["provider"] == "Ollama":
+                translated_text = result.get("response", "")
+            elif ai_api_config["provider"] == "LM Studio":
+                translated_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+            if not translated_text:
+                self.error.emit("Empty response from AI.")
+                return
+
+            logging.debug(f"Raw AI translated_text: '{translated_text}'")
+
+            translated_lines = []
+            for line in translated_text.split('\n'):
+                line = line.strip()
+                if not line or line.lower().startswith(("here is the", "translation:", "translated text:", "note:")):
+                    logging.debug(f"Skipping line: '{line}'")
+                    continue
+                if line and line[0].isdigit() and '.' in line[:3]:
+                    try:
+                        cleaned_line = line[line.index('.') + 1:].strip()
+                        cleaned_line = cleaned_line.replace(" Al ", " AI ").replace(" Al.", " AI.")
+                        translated_lines.append(cleaned_line)
+                        logging.debug(f"Cleaned numbered line: '{line}' -> '{cleaned_line}'")
+                    except ValueError:
+                        logging.warning(f"Failed to clean line: '{line}'")
+                        translated_lines.append(line)
+                else:
+                    translated_lines.append(line)
+
+            logging.debug(f"Cleaned translated_lines: {translated_lines}")
+
+            if len(translated_lines) < self.num_lines:
+                logging.warning(f"AI returned {len(translated_lines)} lines, expected {self.num_lines}. Padding with empty strings.")
+                translated_lines.extend([""] * (self.num_lines - len(translated_lines)))
+            elif len(translated_lines) > self.num_lines:
+                logging.warning(f"AI returned {len(translated_lines)} lines, expected {self.num_lines}. Truncating.")
+                translated_lines = translated_lines[:self.num_lines]
+
+            original_lines = self.text.split('\n')
+            for i in range(min(self.num_lines, len(translated_lines))):
+                if not translated_lines[i].strip() and i < len(original_lines):
+                    logging.debug(f"Line {i+1} is empty; using original: '{original_lines[i]}'")
+                    translated_lines[i] = original_lines[i]
+
+            logging.debug(f"Final translated_lines: {translated_lines}")
+
+            final_text = '\n'.join(translated_lines).strip()
+            logging.debug(f"Final translated text: '{final_text}'")
+
+            if not final_text and not any(translated_lines):
+                self.error.emit("No valid translation text after cleaning.")
+                return
+
+            self.translation_complete.emit(final_text)
+            logging.info(f"AI translation completed: {final_text}")
+
+        except Exception as e:
+            logging.error(f"AI translation failed: {e}")
+            self.error.emit(str(e))
+        finally:
+            self.is_running = False
+
     def stop(self):
         self.is_running = False
         self.quit()
@@ -483,6 +694,118 @@ class IntroDialog(QDialog):
         self.animation.setEasingCurve(QEasingCurve.InOutQuad)
         self.animation.start()
 
+class DraggableResizableWidget(QWidget):
+    def __init__(self, widget, parent=None):
+        super().__init__(parent)
+        self.widget = widget
+        self.setLayout(QVBoxLayout())
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().addWidget(widget)
+        self.setMinimumSize(50, 50)
+
+        self.dragging = False
+        self.resizing = False
+        self.drag_start_pos = None
+        self.resize_start_pos = None
+        self.original_pos = None
+        self.original_size = None
+        self.is_in_design_mode = False
+
+        self.handle_size = 10
+        self.drag_handle_rect = QRect(0, 0, self.handle_size, self.handle_size)
+        self.resize_handle_rect = QRect(0, 0, self.handle_size, self.handle_size)
+
+    def set_design_mode(self, enabled):
+        self.is_in_design_mode = enabled
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.is_in_design_mode:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            pen = QPen(QColor(0, 255, 204), 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
+
+            painter.setBrush(QColor(0, 255, 204, 180))
+            painter.setPen(Qt.NoPen)
+            self.drag_handle_rect = QRect(0, 0, self.handle_size, self.handle_size)
+            painter.drawRect(self.drag_handle_rect)
+
+            self.resize_handle_rect = QRect(self.width() - self.handle_size, self.height() - self.handle_size, self.handle_size, self.handle_size)
+            painter.drawRect(self.resize_handle_rect)
+
+    def mousePressEvent(self, event):
+        if not self.is_in_design_mode:
+            self.widget.mousePressEvent(event)
+            return
+
+        self.drag_start_pos = event.globalPosition().toPoint()
+        self.resize_start_pos = event.globalPosition().toPoint()
+        self.original_pos = self.pos()
+        self.original_size = self.size()
+
+        if self.drag_handle_rect.contains(event.position().toPoint()):
+            self.dragging = True
+            self.setCursor(Qt.SizeAllCursor)
+        elif self.resize_handle_rect.contains(event.position().toPoint()):
+            self.resizing = True
+            self.setCursor(Qt.SizeFDiagCursor)
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if not self.is_in_design_mode:
+            self.widget.mouseMoveEvent(event)
+            return
+
+        if self.dragging:
+            delta = event.globalPosition().toPoint() - self.drag_start_pos
+            new_pos = self.original_pos + delta
+
+            siblings = [w for w in self.parent().findChildren(DraggableResizableWidget) if w != self]
+            min_spacing = 5
+            for sibling in siblings:
+                sibling_rect = sibling.geometry()
+                if sibling_rect.adjusted(-min_spacing, -min_spacing, min_spacing, min_spacing).contains(new_pos):
+                    if new_pos.x() < sibling_rect.x():
+                        new_pos.setX(sibling_rect.x() - self.width() - min_spacing)
+                    else:
+                        new_pos.setX(sibling_rect.right() + min_spacing)
+                    if new_pos.y() < sibling_rect.y():
+                        new_pos.setY(sibling_rect.y() - self.height() - min_spacing)
+                    else:
+                        new_pos.setY(sibling_rect.bottom() + min_spacing)
+
+            parent_rect = self.parent().rect()
+            new_pos.setX(max(0, min(new_pos.x(), parent_rect.width() - self.width())))
+            new_pos.setY(max(0, min(new_pos.y(), parent_rect.height() - self.height())))
+            self.move(new_pos)
+
+        elif self.resizing:
+            delta = event.globalPosition().toPoint() - self.resize_start_pos
+            new_width = max(self.minimumWidth(), self.original_size.width() + delta.x())
+            new_height = max(self.minimumHeight(), self.original_size.height() + delta.y())
+            self.resize(new_width, new_height)
+
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if not self.is_in_design_mode:
+            self.widget.mouseReleaseEvent(event)
+            return
+
+        if self.dragging:
+            self.dragging = False
+            self.unsetCursor()
+        elif self.resizing:
+            self.resizing = False
+            self.unsetCursor()
+        else:
+            self.widget.mousePressEvent(event)
+        event.accept()
+
 class ControlWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -493,11 +816,11 @@ class ControlWindow(QMainWindow):
         self.tray_icon = None
         self.default_font_size = 24
         self.default_font_type = "default"
+        self.translate_with_ai_enabled = False
         self.showIntroDialog()
         self.capture_widget = CaptureWidget(control_window=self)
         self.snipping_tool = SnippingTool(self.capture_widget)
         self.font_size = 20
-        self.improve_translation_enabled = False
         self.initUI()
         self.setupGlobalShortcuts()
         self.load_geometry()
@@ -546,9 +869,8 @@ class ControlWindow(QMainWindow):
         self.toggle_btn = self.createButton('Click-Through (F2)', self.capture_widget.toggleClickThrough, '#9b59b6', '#ab69c6', '#8e44ad', 'click.svg')
         self.snip_btn = self.createButton('Snip (F4)', self.activateSnippingTool, '#16a085', '#26b095', '#138d75', 'snip.svg')
 
-        # Adjust button sizes for font increase/decrease
-        self.increase_font_btn.setFixedSize(40, 40)  # Smaller button size
-        self.decrease_font_btn.setFixedSize(40, 40)  # Smaller button size
+        self.increase_font_btn.setFixedSize(40, 40)
+        self.decrease_font_btn.setFixedSize(40, 40)
 
         slider_style = """
             QSlider::groove:horizontal {
@@ -635,21 +957,21 @@ class ControlWindow(QMainWindow):
                 font-weight: 600;
                 border: 1px solid rgba(255, 255, 255, 20);
                 border-radius: 8px;
-                margin-top: 6px;  /* Further reduced margin */
-                margin-bottom: 0px;  /* Minimize bottom margin */
+                margin-top: 6px;
+                margin-bottom: 0px;
                 background: rgba(30, 30, 30, 150);
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 2px 6px;  /* Further reduced padding */
+                padding: 2px 6px;
                 color: #00ffcc;
             }
         """)
-        font_group.setMaximumHeight(70)  # Set a maximum height to reduce vertical size
+        font_group.setMaximumHeight(70)
         font_layout = QHBoxLayout()
-        font_layout.setContentsMargins(4, 2, 4, 2)  # Further reduced margins
-        font_layout.setSpacing(4)  # Further reduced spacing between buttons
+        font_layout.setContentsMargins(4, 2, 4, 2)
+        font_layout.setSpacing(4)
         font_layout.addWidget(self.increase_font_btn)
         font_layout.addWidget(self.decrease_font_btn)
         font_group.setLayout(font_layout)
@@ -660,9 +982,9 @@ class ControlWindow(QMainWindow):
         settings_layout.addWidget(self.toggle_btn)
         settings_layout.addWidget(QLabel("Opacity:", self))
         settings_layout.addWidget(self.opacity_slider)
-        self.improve_translation_toggle = QPushButton('Improve Translation: OFF', self)
-        self.improve_translation_toggle.setCheckable(True)
-        self.improve_translation_toggle.setStyleSheet("""
+        self.translate_with_ai_toggle = QPushButton('Translate with AI: OFF', self)
+        self.translate_with_ai_toggle.setCheckable(True)
+        self.translate_with_ai_toggle.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #e74c3c, stop:1 #c0392b);
                 color: #ffffff;
@@ -673,14 +995,14 @@ class ControlWindow(QMainWindow):
             }
             QPushButton:hover:!checked {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f75c4c, stop:1 #d1483b);
-                padding: 11px;  /* Subtle padding change for hover effect */
+                padding: 11px;
             }
             QPushButton:checked {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2ecc71, stop:1 #27ae60);
             }
             QPushButton:hover:checked {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3edf81, stop:1 #38bf71);
-                padding: 11px;  /* Subtle padding change for hover effect */
+                padding: 11px;
             }
             QPushButton:pressed {
                 background: #c0392b;
@@ -688,8 +1010,8 @@ class ControlWindow(QMainWindow):
                 padding-bottom: 10px;
             }
         """)
-        self.improve_translation_toggle.clicked.connect(self.toggleImproveTranslation)
-        settings_layout.addWidget(self.improve_translation_toggle)
+        self.translate_with_ai_toggle.clicked.connect(self.toggleTranslateWithAI)
+        settings_layout.addWidget(self.translate_with_ai_toggle)
         settings_group.setLayout(settings_layout)
         main_layout.addWidget(settings_group)
 
@@ -760,7 +1082,7 @@ class ControlWindow(QMainWindow):
         settings_menu.addAction("Source Language", self.selectSourceLanguage)
         settings_menu.addAction("Target Language", self.selectTargetLanguage)
         settings_menu.addAction("Server", self.openServer)
-        settings_menu.addAction("Toggle Improved Translation", self.toggleImproveTranslation)
+        settings_menu.addAction("Toggle Translate with AI", self.toggleTranslateWithAI)
         settings_menu.addAction("Set Default Font Size", self.setDefaultFontSize)
         settings_menu.addAction("Set Default Font Type", self.setDefaultFontType)
         settings_menu.addAction("Configure AI API", self.configureAIAPI)
@@ -803,40 +1125,38 @@ class ControlWindow(QMainWindow):
         button.setGraphicsEffect(shadow)
         return button
 
-    def toggleImproveTranslation(self):
-        # Check if live capture is active first
+    def toggleTranslateWithAI(self):
         if self.live_capture_timer.isActive():
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Warning")
-            msg_box.setText("Improved translations cannot be enabled during live capture due to performance issues.")
+            msg_box.setText("Translate with AI cannot be enabled during live capture due to performance issues.")
             msg_box.setStyleSheet(GLOBAL_STYLESHEET)
             msg_box.exec()
-            self.improve_translation_enabled = False
-            self.improve_translation_toggle.setChecked(False)
-            self.improve_translation_toggle.setText('Improve Translation: OFF')
-            self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
-            logging.info("Improved translations disabled due to active live capture")
+            self.translate_with_ai_enabled = False
+            self.translate_with_ai_toggle.setChecked(False)
+            self.translate_with_ai_toggle.setText('Translate with AI: OFF')
+            self.translate_with_ai_toggle.setStyleSheet(self.translate_with_ai_toggle.styleSheet())
+            logging.info("Translate with AI disabled due to active live capture")
             return
 
-        # If live capture is not active, proceed with toggle logic
         if not ai_api_config["provider"]:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Warning")
             msg_box.setText("Please set an AI API provider first in Settings > Configure AI API")
             msg_box.setStyleSheet(GLOBAL_STYLESHEET)
             msg_box.exec()
-            self.improve_translation_enabled = False
-            self.improve_translation_toggle.setChecked(False)
-            self.improve_translation_toggle.setText('Improve Translation: OFF')
-            self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
+            self.translate_with_ai_enabled = False
+            self.translate_with_ai_toggle.setChecked(False)
+            self.translate_with_ai_toggle.setText('Translate with AI: OFF')
+            self.translate_with_ai_toggle.setStyleSheet(self.translate_with_ai_toggle.styleSheet())
             return
             
-        self.improve_translation_enabled = not self.improve_translation_enabled
-        self.improve_translation_toggle.setChecked(self.improve_translation_enabled)
-        self.improve_translation_toggle.setText(
-            'Improve Translation: ON' if self.improve_translation_enabled else 'Improve Translation: OFF'
+        self.translate_with_ai_enabled = not self.translate_with_ai_enabled
+        self.translate_with_ai_toggle.setChecked(self.translate_with_ai_enabled)
+        self.translate_with_ai_toggle.setText(
+            'Translate with AI: ON' if self.translate_with_ai_enabled else 'Translate with AI: OFF'
         )
-        self.improve_translation_toggle.setStyleSheet(self.improve_translation_toggle.styleSheet())
+        self.translate_with_ai_toggle.setStyleSheet(self.translate_with_ai_toggle.styleSheet())
 
     def toggleLiveCapture(self):
         if self.live_capture_timer.isActive():
@@ -848,16 +1168,16 @@ class ControlWindow(QMainWindow):
             if os.path.exists(icon_path):
                 self.live_capture_btn.setIcon(QIcon(icon_path))
                 self.live_capture_btn.setText('')
-            if self.improve_translation_enabled:
-                self.improve_translation_enabled = False
-                self.improve_translation_toggle.setText('Improve Translation: OFF')
-                QMessageBox.information(self, "Info", "Improved translations disabled during live capture.")
+            if self.translate_with_ai_enabled:
+                self.translate_with_ai_enabled = False
+                self.translate_with_ai_toggle.setText('Translate with AI: OFF')
+                QMessageBox.information(self, "Info", "Translate with AI disabled during live capture.")
         else:
-            if self.improve_translation_enabled:
-                reply = QMessageBox.question(self, "Warning", "Improved translations may cause instability during live capture. Continue?", QMessageBox.Yes | QMessageBox.No)
+            if self.translate_with_ai_enabled:
+                reply = QMessageBox.question(self, "Warning", "Translate with AI may cause instability during live capture. Continue?", QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.No:
-                    self.improve_translation_enabled = False
-                    self.improve_translation_toggle.setText('Improve Translation: OFF')
+                    self.translate_with_ai_enabled = False
+                    self.translate_with_ai_toggle.setText('Translate with AI: OFF')
             self.live_capture_timer.start()
             if not (self.live_translation_popout and self.live_translation_popout.isVisible()):
                 self.live_translation_label.setVisible(True)
@@ -868,31 +1188,65 @@ class ControlWindow(QMainWindow):
                 self.live_capture_btn.setText('')
 
     def captureScreen(self):
-        try:
-            rect = self.capture_widget.rect()
-            screen = QApplication.primaryScreen()
-            screenshot = screen.grabWindow(0, self.capture_widget.x(), self.capture_widget.y(), rect.width(), rect.height())
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            fileName = os.path.join(SUPPORT_FOLDER, f"capture_{timestamp}.png")
-            screenshot.save(fileName, format='PNG', quality=95)
-            self.capture_widget.current_capture_path = fileName
-            self.capture_widget.translateAndDisplay(fileName)
-        except Exception as e:
-            logging.error(f"Capture failed: {e}")
-            QMessageBox.critical(self.capture_widget, "Error", f"Capture failed: {e}")
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                rect = self.capture_widget.rect()
+                screen = QApplication.primaryScreen()
+                screenshot = screen.grabWindow(0, self.capture_widget.x(), self.capture_widget.y(), rect.width(), rect.height())
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                fileName = os.path.join(SUPPORT_FOLDER, f"capture_{timestamp}.png")
+                
+                if not screenshot.save(fileName, format='PNG', quality=95):
+                    raise Exception("Failed to save screenshot.")
+                
+                if not os.path.exists(fileName) or os.path.getsize(fileName) == 0:
+                    raise Exception("Screenshot file is empty or does not exist.")
+                
+                with Image.open(fileName) as img:
+                    img.verify()
+                
+                self.capture_widget.current_capture_path = fileName
+                self.capture_widget.translateAndDisplay(fileName)
+                return
+            except Exception as e:
+                logging.error(f"Capture attempt {attempt + 1}/{max_attempts} failed: {e}")
+                if attempt == max_attempts - 1:
+                    QMessageBox.critical(self.capture_widget, "Error", f"Capture failed after {max_attempts} attempts: {e}")
+                    return
+                time.sleep(0.5)
 
     def captureScreenForLiveTranslation(self):
-        rect = self.capture_widget.rect()
-        screen = QApplication.primaryScreen()
-        screenshot = screen.grabWindow(0, self.capture_widget.x(), self.capture_widget.y(), rect.width(), rect.height())
-        tempFile = os.path.join(self.capture_widget.tempDir, 'live_capture.png')
-        screenshot.save(tempFile, format='PNG', quality=95)
-        self.startTranslationWorker(tempFile, live=True)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                rect = self.capture_widget.rect()
+                screen = QApplication.primaryScreen()
+                screenshot = screen.grabWindow(0, self.capture_widget.x(), self.capture_widget.y(), rect.width(), rect.height())
+                tempFile = os.path.join(self.capture_widget.tempDir, 'live_capture.png')
+                
+                if not screenshot.save(tempFile, format='PNG', quality=95):
+                    raise Exception("Failed to save screenshot for live translation.")
+                
+                if not os.path.exists(tempFile) or os.path.getsize(tempFile) == 0:
+                    raise Exception("Live screenshot file is empty or does not exist.")
+                
+                with Image.open(tempFile) as img:
+                    img.verify()
+                
+                self.startTranslationWorker(tempFile, live=True)
+                return
+            except Exception as e:
+                logging.error(f"Live capture attempt {attempt + 1}/{max_attempts} failed: {e}")
+                if attempt == max_attempts - 1:
+                    self.live_translation_label.setText(f"Error: {e}")
+                    return
+                time.sleep(0.5)
 
     def startTranslationWorker(self, fileName, live=False):
-        improve_translation = self.improve_translation_enabled and not live
+        use_translate_with_ai = self.translate_with_ai_enabled and not live
         contrast_factor = self.capture_widget.contrast_factor
-        self.translation_worker = TranslationWorker(fileName, self.source_language, self.target_language, self.capture_widget.fonts, improve_translation, contrast_factor, live, self)
+        self.translation_worker = TranslationWorker(fileName, self.source_language, self.target_language, self.capture_widget.fonts, use_translate_with_ai, contrast_factor, live, self)
         if live:
             self.translation_worker.translation_complete.connect(self.updateLiveTranslation)
         else:
@@ -924,7 +1278,6 @@ class ControlWindow(QMainWindow):
             self.tray_icon.show()
             self.tray_icon.activated.connect(self.trayIconActivated)
             logging.debug(f"Tray icon initialized with path: {icon_path}")
-            # Test if tray icon is visible
             self.tray_icon.showMessage(
                 "Overlay Translate",
                 "Tray icon initialized successfully.",
@@ -951,7 +1304,6 @@ class ControlWindow(QMainWindow):
                 10000
             )
             logging.debug("Tray notification triggered")
-            # Fallback message if tray notification fails
             QTimer.singleShot(500, lambda: self.showFallbackMessage())
         else:
             logging.error("Tray icon not initialized, cannot show notification")
@@ -982,7 +1334,7 @@ class ControlWindow(QMainWindow):
         self.shortcut_snip = QShortcut(QKeySequence("F4"), QApplication.instance(), self.activateSnippingTool)
         self.shortcut_server = QShortcut(QKeySequence("F6"), QApplication.instance(), self.openServer)
         self.shortcut_exit = QShortcut(QKeySequence("F7"), QApplication.instance(), self.closeApplication)
-        self.shortcut_improve = QShortcut(QKeySequence("F8"), QApplication.instance(), self.toggleImproveTranslation)
+        self.shortcut_improve = QShortcut(QKeySequence("F8"), QApplication.instance(), self.toggleTranslateWithAI)
 
     def selectSourceLanguage(self):
         source_languages = {
@@ -1185,8 +1537,9 @@ class ControlWindow(QMainWindow):
     def closeApplication(self):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Confirm Exit")
-        msg_box.setText("Are you sure to quit? Exiting will delete the 'Support' folder on your Desktop containing all captures.")
+        msg_box.setText("Are you sure you want to exit Overlay Translate?")
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.No)
         msg_box.setStyleSheet("""
             QMessageBox {
                 background-color: rgba(30, 30, 30, 200);
@@ -1258,9 +1611,7 @@ class ControlWindow(QMainWindow):
         self.capture_widget.close()
         if self.tray_icon:
             self.tray_icon.hide()
-        if os.path.exists(SUPPORT_FOLDER):
-            shutil.rmtree(SUPPORT_FOLDER, ignore_errors=True)
-            logging.info(f"Deleted Support folder at {SUPPORT_FOLDER}")
+        logging.info(f"Support folder retained at {SUPPORT_FOLDER}")
 
     def load_geometry(self):
         positions = load_window_positions()
@@ -1362,8 +1713,8 @@ class ControlWindow(QMainWindow):
         api_layout.addLayout(lmstudio_layout)
         api_group.setLayout(api_layout)
         layout.addWidget(api_group)
-
         button_box = QHBoxLayout()
+        save_btn = QPushButton()
         save_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
         save_btn.clicked.connect(lambda: self.save_api_settings(dialog))
@@ -1396,7 +1747,7 @@ class ControlWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", "Please enter an endpoint for Ollama")
                 return
             ai_api_config.update({"provider": "Ollama", "endpoint": f"{endpoint.rstrip('/')}/api/chat"})
-            keyring.set_password("OverlayTranslate", "Ollama", "")  # No API key needed
+            keyring.set_password("OverlayTranslate", "Ollama", "")
             provider_name = "Ollama"
         elif self.lmstudio_checkbox.isChecked():
             api_key = self.lmstudio_key_input.text().strip()
@@ -1440,10 +1791,10 @@ class ControlWindow(QMainWindow):
         msg_box.exec()
         self.saveAPISettings()
         
-        if not ai_api_config["provider"] and self.improve_translation_enabled:
-            self.improve_translation_enabled = False
-            self.improve_translation_toggle.setChecked(False)
-            self.improve_translation_toggle.setText('Improve Translation: OFF')
+        if not ai_api_config["provider"] and self.translate_with_ai_enabled:
+            self.translate_with_ai_enabled = False
+            self.translate_with_ai_toggle.setChecked(False)
+            self.translate_with_ai_toggle.setText('Translate with AI: OFF')
         
         dialog.accept()
 
@@ -1532,8 +1883,8 @@ class CaptureWidget(QWidget):
             "zh": get_system_font_path("zh"),
             "ko": get_system_font_path("ko")
         }
-        self.threshold = 5  # Default value since slider is removed
-        self.contrast_factor = 1.0  # Default value since slider is removed
+        self.threshold = 5
+        self.contrast_factor = 1.0
         self.tempDir = tempfile.mkdtemp(prefix="OverlayTranslate_")
         self.original_text = ""
         self.translated_text = ""
@@ -1584,18 +1935,33 @@ class CaptureWidget(QWidget):
         painter.drawRect(self.width() - self.borderRadius, self.height() - self.borderRadius, self.borderRadius, self.borderRadius)
 
     def captureScreen(self):
-        try:
-            rect = self.rect()
-            screen = QApplication.primaryScreen()
-            screenshot = screen.grabWindow(0, self.x(), self.y(), rect.width(), rect.height())
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            fileName = os.path.join(SUPPORT_FOLDER, f"capture_{timestamp}.png")
-            screenshot.save(fileName, format='PNG', quality=95)
-            self.current_capture_path = fileName
-            self.translateAndDisplay(fileName)
-        except Exception as e:
-            logging.error(f"Capture failed: {e}")
-            QMessageBox.critical(self, "Error", f"Capture failed: {e}")
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                rect = self.rect()
+                screen = QApplication.primaryScreen()
+                screenshot = screen.grabWindow(0, self.x(), self.y(), rect.width(), rect.height())
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                fileName = os.path.join(SUPPORT_FOLDER, f"capture_{timestamp}.png")
+                
+                if not screenshot.save(fileName, format='PNG', quality=95):
+                    raise Exception("Failed to save screenshot.")
+                
+                if not os.path.exists(fileName) or os.path.getsize(fileName) == 0:
+                    raise Exception("Screenshot file is empty or does not exist.")
+                
+                with Image.open(fileName) as img:
+                    img.verify()
+                
+                self.current_capture_path = fileName
+                self.translateAndDisplay(fileName)
+                return
+            except Exception as e:
+                logging.error(f"Capture attempt {attempt + 1}/{max_attempts} failed: {e}")
+                if attempt == max_attempts - 1:
+                    QMessageBox.critical(self, "Error", f"Capture failed after {max_attempts} attempts: {e}")
+                    return
+                time.sleep(0.5)
 
     def translateAndDisplay(self, fileName, live=False):
         if not live:
@@ -1605,9 +1971,9 @@ class CaptureWidget(QWidget):
     def startTranslationWorker(self, fileName, live):
         if self.translation_worker and self.translation_worker.isRunning():
             self.translation_worker.stop()
-        improve_translation = self.control_window.improve_translation_enabled and not live
+        use_translate_with_ai = self.control_window.translate_with_ai_enabled and not live
         contrast_factor = self.contrast_factor
-        self.translation_worker = TranslationWorker(fileName, self.control_window.source_language, self.target_language, self.fonts, improve_translation, contrast_factor, live, self)
+        self.translation_worker = TranslationWorker(fileName, self.control_window.source_language, self.target_language, self.fonts, use_translate_with_ai, contrast_factor, live, self)
         if live:
             self.translation_worker.translation_complete.connect(self.control_window.updateLiveTranslation)
         else:
@@ -1625,14 +1991,15 @@ class CaptureWidget(QWidget):
         live = result['live']
         fileName = self.translation_worker.file_name
 
-        # Save the text file for non-live captures
+        logging.debug(f"Received translated_text: '{self.translated_text}'")
+        logging.debug(f"Received translated_lines: {result['translated_lines']}")
+
         if not live:
             timestamp = os.path.basename(fileName).replace("capture_", "").replace(".png", "")
             text_file = os.path.join(SUPPORT_FOLDER, f"text_{timestamp}.txt")
             with open(text_file, 'w', encoding='utf-8') as f:
                 f.write(f"Original Text:\n{self.original_text}\n\nTranslated Text:\n{self.translated_text}")
 
-        # Open the custom viewer for non-live captures
         if not live:
             viewer = TranslatedImageViewer(
                 fileName,
@@ -1643,9 +2010,7 @@ class CaptureWidget(QWidget):
                 self
             )
             viewer.exec()
-            # The viewer saves the image when the user clicks "Save"
         else:
-            # For live captures, save the image directly
             image = Image.open(fileName).convert("RGBA")
             draw = ImageDraw.Draw(image)
             boxes = result['boxes']
@@ -1780,7 +2145,7 @@ class ChatWindow(QDialog):
         self.parent = parent
         self.font_size = 14
         self.setWindowTitle("AI Terminal")
-        self.setMinimumSize(400, 300)  # Explicit size to avoid rendering issues
+        self.setMinimumSize(400, 300)
         try:
             self.initUI()
             logging.debug("ChatWindow.__init__ completed")
@@ -1921,6 +2286,7 @@ class ChatWindow(QDialog):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.stop()
         event.accept()
+
 class AIStreamingWorker(QThread):
     text_chunk = Signal(str)
     finished = Signal(str)
@@ -1954,7 +2320,7 @@ class AIStreamingWorker(QThread):
                 data = {
                     "model": "gpt-3.5-turbo",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 50,
+                    "max_tokens": 5000,
                     "temperature": 0.5,
                     "stream": True
                 }
@@ -1974,7 +2340,7 @@ class AIStreamingWorker(QThread):
                 data = {
                     "model": "gpt-3.5-turbo",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 50,
+                    "max_tokens": 5000,
                     "temperature": 0.5,
                     "stream": True
                 }
@@ -2007,7 +2373,7 @@ class AIStreamingWorker(QThread):
                                 json_data = json.loads(decoded_line)
                                 logging.debug(f"Parsed JSON: {json_data}")
                                 if json_data.get("done", False):
-                                    continue  # Skip done messages
+                                    continue
                                 text_chunk = json_data.get("message", {}).get("content", "")
                                 if text_chunk and isinstance(text_chunk, str):
                                     logging.debug(f"Valid text chunk: '{text_chunk}'")
@@ -2053,13 +2419,12 @@ class ColorBarPicker(QWidget):
 
     def __init__(self, initial_color=QColor(255, 255, 255), parent=None):
         super().__init__(parent)
-        self.setFixedSize(200, 60)  # Width for the bar, height for bar + slider
+        self.setFixedSize(200, 60)
         self.color = initial_color
         self.hue = 0
         self.saturation = 1.0
         self.value = 1.0
         self.setMouseTracking(True)
-        # Initialize UI before updating color to ensure widgets exist
         self.initUI()
         self.updateColorFromQColor(initial_color)
 
@@ -2068,14 +2433,12 @@ class ColorBarPicker(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        # Hue bar (clickable gradient)
         self.hue_bar = QWidget(self)
         self.hue_bar.setFixedHeight(20)
         self.hue_bar.mousePressEvent = self.hueBarMousePress
         self.hue_bar.mouseMoveEvent = self.hueBarMouseMove
         layout.addWidget(self.hue_bar)
 
-        # Saturation slider
         self.saturation_slider = QSlider(Qt.Horizontal, self)
         self.saturation_slider.setRange(0, 100)
         self.saturation_slider.setValue(int(self.saturation * 100))
@@ -2097,14 +2460,12 @@ class ColorBarPicker(QWidget):
         with QPainter(self) as painter:
             painter.setRenderHint(QPainter.Antialiasing)
 
-            # Draw hue bar
             hue_rect = QRect(0, 0, self.hue_bar.width(), self.hue_bar.height())
             gradient = QLinearGradient(hue_rect.topLeft(), hue_rect.topRight())
             for i in range(7):
                 gradient.setColorAt(i / 6.0, QColor.fromHsvF(i / 6.0, 1.0, 1.0))
             painter.fillRect(hue_rect, gradient)
 
-            # Draw hue marker
             hue_pos = self.hue * self.hue_bar.width()
             painter.setPen(QPen(Qt.white, 2))
             painter.drawLine(hue_pos, 0, hue_pos, self.hue_bar.height())
@@ -2117,7 +2478,6 @@ class ColorBarPicker(QWidget):
             self.updateHueFromMouse(event.pos())
 
     def updateHueFromMouse(self, pos):
-        # Map the x position to a hue value (0 to 1)
         x = max(0, min(pos.x(), self.hue_bar.width()))
         self.hue = x / self.hue_bar.width()
         self.updateColor()
@@ -2144,20 +2504,28 @@ class TranslatedImageViewer(QDialog):
         super().__init__(parent)
         self.image_path = image_path
         self.boxes = boxes
-        self.translated_lines = translated_lines
+        self.translated_lines = translated_lines or []
         self.font_path = font_path
         self.font_size = default_font_size
+        self.original_lines = translated_lines[:]  # Copy for fallback
 
-        # Load saved settings or use defaults
+        # Load viewer settings with defaults
         positions = load_window_positions()
         viewer_settings = positions.get('viewer_settings', {})
-        self.font_color = QColor(*viewer_settings.get('font_color', (0, 0, 255, 255)))  # Default: Blue
-        self.bg_color_outer = QColor(*viewer_settings.get('bg_color_outer', (255, 255, 255, 220)))  # Default outer gradient
-        self.bg_color_inner = QColor(*viewer_settings.get('bg_color_inner', (180, 200, 255, 180)))  # Default inner gradient
-        self.font_path = viewer_settings.get('font_path', font_path)  # Default to passed font_path
-        self.font_size = viewer_settings.get('font_size', default_font_size)  # Default to passed font_size
+        self.font_color = QColor(*viewer_settings.get('font_color', (0, 0, 255, 255)))
+        self.bg_color_outer = QColor(*viewer_settings.get('bg_color_outer', (255, 255, 255, 220)))
+        self.bg_color_inner = QColor(*viewer_settings.get('bg_color_inner', (180, 200, 255, 180)))
+        self.font_path = viewer_settings.get('font_path', font_path)
+        self.font_size = viewer_settings.get('font_size', default_font_size)
 
-        self.original_image = Image.open(image_path).convert("RGBA")
+        try:
+            self.original_image = Image.open(image_path).convert("RGBA")
+        except Exception as e:
+            logging.error(f"Failed to load image {image_path}: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
+            return
+
+        self.rendered_image = self.original_image.copy()
         self.setWindowTitle("Translated Image Viewer")
         self.setStyleSheet(GLOBAL_STYLESHEET)
         self.initUI()
@@ -2168,22 +2536,18 @@ class TranslatedImageViewer(QDialog):
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Image display
         self.image_label = QLabel(self)
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout.addWidget(self.image_label)
 
-        # Controls group
         controls_group = QGroupBox("Adjust Display")
         controls_layout = QVBoxLayout()
 
-        # Font selection
         font_layout = QHBoxLayout()
         font_label = QLabel("Font:")
         self.font_combo = QComboBox()
         font_db = QFontDatabase()
-        # Create a mapping of font family to font path for lookup
         self.font_family_to_path = {}
         for font_family in font_db.families():
             self.font_combo.addItem(font_family)
@@ -2206,7 +2570,6 @@ class TranslatedImageViewer(QDialog):
                     font_path = "arial.ttf"
             self.font_family_to_path[font_family] = font_path
 
-        # Find the font family that matches the loaded font_path
         selected_family = None
         for family, path in self.font_family_to_path.items():
             if path == self.font_path:
@@ -2223,7 +2586,6 @@ class TranslatedImageViewer(QDialog):
         font_layout.addWidget(self.font_combo)
         controls_layout.addLayout(font_layout)
 
-        # Font size controls
         font_size_layout = QHBoxLayout()
         font_size_label = QLabel("Font Size:")
         self.font_size_slider = QSlider(Qt.Horizontal)
@@ -2234,7 +2596,6 @@ class TranslatedImageViewer(QDialog):
         font_size_layout.addWidget(self.font_size_slider)
         controls_layout.addLayout(font_size_layout)
 
-        # Font color controls
         font_color_layout = QHBoxLayout()
         font_color_label = QLabel("Font Color:")
         self.font_color_picker = ColorBarPicker(self.font_color)
@@ -2243,7 +2604,6 @@ class TranslatedImageViewer(QDialog):
         font_color_layout.addWidget(self.font_color_picker)
         controls_layout.addLayout(font_color_layout)
 
-        # Background color controls (outer gradient)
         bg_color_layout = QHBoxLayout()
         bg_color_label = QLabel("Background Color:")
         self.bg_color_picker = ColorBarPicker(self.bg_color_outer)
@@ -2255,7 +2615,6 @@ class TranslatedImageViewer(QDialog):
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
 
-        # Save & Close button
         button_layout = QHBoxLayout()
         self.save_close_btn = QPushButton("Save & Close")
         self.save_close_btn.clicked.connect(self.saveAndClose)
@@ -2280,19 +2639,20 @@ class TranslatedImageViewer(QDialog):
     def updateFont(self):
         font_name = self.font_combo.currentText()
         try:
-            font = QFontDatabase().font(font_name, "", self.font_size)
-            # Update font_path using the mapping
             self.font_path = self.font_family_to_path.get(font_name, "arial.ttf")
             if not os.path.exists(self.font_path):
+                logging.warning(f"Font path {self.font_path} does not exist, falling back to Arial")
                 self.font_path = "arial.ttf"
             logging.debug(f"Font updated to: {font_name}, path: {self.font_path}")
+            self.updateImageDisplay()
         except Exception as e:
+            logging.warning(f"Failed to update font {font_name}: {e}, falling back to Arial")
             self.font_path = "arial.ttf"
-            logging.warning(f"Failed to load font {font_name}: {e}, falling back to Arial")
-        self.updateImageDisplay()
+            self.updateImageDisplay()
 
     def updateFontSize(self):
         self.font_size = self.font_size_slider.value()
+        logging.debug(f"Font size updated to: {self.font_size}")
         self.updateImageDisplay()
 
     def updateFontColor(self, color):
@@ -2307,27 +2667,6 @@ class TranslatedImageViewer(QDialog):
         logging.debug(f"Background colors updated - outer: {self.bg_color_outer.getRgb()}, inner: {self.bg_color_inner.getRgb()}")
         self.updateImageDisplay()
 
-    def saveAndClose(self):
-        # Save the current settings
-        positions = load_window_positions()
-        positions['viewer_settings'] = {
-            'font_color': (self.font_color.red(), self.font_color.green(), self.font_color.blue(), self.font_color.alpha()),
-            'bg_color_outer': (self.bg_color_outer.red(), self.bg_color_outer.green(), self.bg_color_outer.blue(), self.bg_color_outer.alpha()),
-            'bg_color_inner': (self.bg_color_inner.red(), self.bg_color_inner.green(), self.bg_color_inner.blue(), self.bg_color_inner.alpha()),
-            'font_path': self.font_path,
-            'font_size': self.font_size
-        }
-        save_window_positions(positions)
-        logging.info("Viewer settings saved successfully.")
-
-        # Save the current rendered image to the Support folder
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        save_path = os.path.join(SUPPORT_FOLDER, f"translated_{timestamp}.png")
-        self.rendered_image.save(save_path, format='PNG', quality=95)
-        logging.info(f"Saved translated image to: {save_path}")
-        QMessageBox.information(self, "Saved", f"Image saved to:\n{save_path}")
-        self.accept()
-
     def updateImageDisplay(self):
         image = self.original_image.copy()
         draw = ImageDraw.Draw(image)
@@ -2337,8 +2676,13 @@ class TranslatedImageViewer(QDialog):
         bg_color_outer_tuple = (self.bg_color_outer.red(), self.bg_color_outer.green(), self.bg_color_outer.blue(), self.bg_color_outer.alpha())
         bg_color_inner_tuple = (self.bg_color_inner.red(), self.bg_color_inner.green(), self.bg_color_inner.blue(), self.bg_color_inner.alpha())
 
-        if not self.boxes:
+        try:
             font = ImageFont.truetype(self.font_path, self.font_size)
+        except Exception as e:
+            logging.warning(f"Failed to load font {self.font_path}: {e}, falling back to Arial")
+            font = ImageFont.truetype("arial.ttf", self.font_size)
+
+        if not self.boxes:
             full_text = "No text detected."
             text_bbox = font.getbbox(full_text)
             text_width = text_bbox[2] - text_bbox[0]
@@ -2351,11 +2695,13 @@ class TranslatedImageViewer(QDialog):
             gradient_draw.rectangle([(5, 5), (text_width + 15, text_height + 15)], fill=bg_color_inner_tuple)
             image.paste(gradient, (int(text_x - 10), int(text_y - 10)), gradient)
             draw.text((text_x, text_y), full_text, font=font, fill=font_color_tuple)
+            logging.debug("Rendered 'No text detected' message")
         else:
             for i, bbox in enumerate(self.boxes):
-                translated_line = self.translated_lines[i].strip()
-
-                font = ImageFont.truetype(self.font_path, self.font_size)
+                translated_line = self.translated_lines[i].strip() if i < len(self.translated_lines) else ""
+                if not translated_line and i < len(self.original_lines):
+                    translated_line = self.original_lines[i].strip()
+                    logging.debug(f"Using original line {i+1}: '{translated_line}' as fallback")
 
                 text_x = bbox[0]
                 text_y = bbox[1]
@@ -2370,17 +2716,41 @@ class TranslatedImageViewer(QDialog):
                 image.paste(gradient, (int(bbox[0] - 10), int(bbox[1] - 10)), gradient)
 
                 draw.text((text_x, text_y), translated_line, font=font, fill=font_color_tuple)
+                logging.debug(f"Rendered line {i+1}: '{translated_line}' at ({text_x}, {text_y})")
 
-        # Store the rendered image for saving
         self.rendered_image = image
 
-        # Convert PIL Image to QPixmap for display
+        # Convert PIL Image to QPixmap
         image_data = image.convert("RGB").tobytes("raw", "RGB")
         qimage = QImage(image_data, image.width, image.height, image.width * 3, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimage)
         scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled_pixmap)
-                
+        logging.debug("Image display updated")
+
+    def saveAndClose(self):
+        positions = load_window_positions()
+        positions['viewer_settings'] = {
+            'font_color': (self.font_color.red(), self.font_color.green(), self.font_color.blue(), self.font_color.alpha()),
+            'bg_color_outer': (self.bg_color_outer.red(), self.bg_color_outer.green(), self.bg_color_outer.blue(), self.bg_color_outer.alpha()),
+            'bg_color_inner': (self.bg_color_inner.red(), self.bg_color_inner.green(), self.bg_color_inner.blue(), self.bg_color_inner.alpha()),
+            'font_path': self.font_path,
+            'font_size': self.font_size
+        }
+        save_window_positions(positions)
+        logging.info("Viewer settings saved")
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_path = os.path.join(SUPPORT_FOLDER, f"translated_{timestamp}.png")
+        try:
+            self.rendered_image.save(save_path, format='PNG', quality=95)
+            logging.info(f"Saved translated image to: {save_path}")
+            QMessageBox.information(self, "Saved", f"Image saved to:\n{save_path}")
+        except Exception as e:
+            logging.error(f"Failed to save image to {save_path}: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save image: {e}")
+        self.accept()
+
 if __name__ == '__main__':
     try:
         app = QApplication(sys.argv)
