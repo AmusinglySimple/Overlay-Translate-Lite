@@ -27,7 +27,7 @@ Overlay Translate is a powerful offline tool designed to capture on-screen text,
 ## System Requirements
 
 - **Operating System**: Windows 10/11, macOS, or Linux
-- **Python**: 3.8 or higher
+- **Python**: 3.8 
 - **Hardware**:
   - No GPU required (CPU-based OCR and translation)
   - Minimum 4 GB RAM (8 GB recommended for AI features)
@@ -55,9 +55,9 @@ Overlay Translate is a powerful offline tool designed to capture on-screen text,
    - Install LibreTranslate locally for offline translation:
      ```bash
      pip install libretranslate
-     libretranslate --host 127.0.0.1 --port 5000
+    
      ```
-   - Ensure LibreTranslate is running on `http://127.0.0.1:5000` before starting the application.
+   - LibreTranslate will be running only during the session on `http://127.0.0.1:5000` after starting the application.
 
 4. **Optional - Configure AI Models**:
    - For AI-enhanced translations or chat, configure an AI provider (OpenAI, Ollama, or LM Studio) via the *Settings > Configure AI API* menu.
@@ -65,7 +65,7 @@ Overlay Translate is a powerful offline tool designed to capture on-screen text,
 
 5. **Run the Application**:
    ```bash
-   python otfull.py
+   python OT - API Requests.py
    ```
 
 ---
