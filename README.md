@@ -64,8 +64,7 @@ Language settings can be configured in the *Settings* menu.
 
 ```
 OverlayTranslate/
-├── models/
-│   ├── Phi-3.1-mini-128k-instruct-Q4_K_M.gguf
+├── db/ (generated at runtime)
 ├── assets/
 │   ├── icon.png
 ├── window_positions.json (generated at runtime)
@@ -78,16 +77,17 @@ OverlayTranslate/
 ## requirements.txt
 
 ```
-PyQt5>=5.15.7
-paddleocr>=2.7.0 # Or latest stable version
-transformers>=4.30.0
-torch>=1.13.0
-Pillow>=9.2.0
-opencv-python>=4.6.0
-langdetect>=1.0.9
-requests>=2.28.1
-libretranslate>=1.5.3
-llama-cpp-python>=0.2.20 # Or latest stable version
+PySide6
+paddlepaddle
+paddleocr
+Pillow
+opencv-python
+langdetect
+requests
+libretranslate
+numpy
+keyring
+
 ```
 
 ---
@@ -95,7 +95,7 @@ llama-cpp-python>=0.2.20 # Or latest stable version
 ## Additional Notes
 
 - Captures and translations are stored temporarily in the `Support` folder on your desktop.
-- The LLM model is optional, but improves translation quality.
+- The AI API is optional, but it can improve translation quality based on context.
 - It is strongly recommended to run LibreTranslate locally for full offline functionality.
 
 ---
