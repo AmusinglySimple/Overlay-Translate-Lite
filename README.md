@@ -1,6 +1,3 @@
-Below is an updated version of your `README.md` for **Overlay Translate**, tailored to reflect the features and structure of your `otfull.py` script. The update maintains the original structure, improves clarity, and incorporates details from the provided code, such as the system tray integration, AI API configuration, and the modern UI. It also corrects minor inaccuracies (e.g., the script name, hotkeys, and requirements) and enhances the documentation to be more user-friendly and professional.
-
----
 
 # Overlay Translate
 
