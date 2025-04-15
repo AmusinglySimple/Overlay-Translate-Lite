@@ -1,62 +1,90 @@
+Below is an updated version of your `README.md` for **Overlay Translate**, tailored to reflect the features and structure of your `otfull.py` script. The update maintains the original structure, improves clarity, and incorporates details from the provided code, such as the system tray integration, AI API configuration, and the modern UI. It also corrects minor inaccuracies (e.g., the script name, hotkeys, and requirements) and enhances the documentation to be more user-friendly and professional.
+
+---
+
 # Overlay Translate
 
-Overlay Translate is an offline tool to capture on-screen text, translate it live, and display it in a non-intrusive overlay. Ideal for translating content in videos, games, software, or documents without needing an internet connection.
+Overlay Translate is a powerful offline tool designed to capture on-screen text, translate it in real-time, and display translations in a customizable, non-intrusive overlay. Perfect for translating text in videos, games, software, documents, or any on-screen content without an internet connection.
 
 ---
 
 ## Features
 
-- ✨ Live translations from a floating region
-- 📸 Static screen capture for instant translation
-- 🔍 Offline OCR with PaddleOCR
-- ⚖ Offline translations using LibreTranslate
-- 🔧 Optional enhancement of translations using local LLMs
-- 🌐 Multilingual support with auto-detection
-- ✅ Font, opacity, and contrast customization
-- ✂️ Built-in snipping tool support
+- ✨ **Live Translation**: Stream translations in real-time from a floating capture region.
+- 📸 **Static Capture**: Take instant screenshots for quick translations.
+- 🔍 **Offline OCR**: Powered by PaddleOCR for accurate text recognition.
+- ⚖ **Offline Translation**: Uses LibreTranslate for reliable, internet-free translations.
+- 🤖 **AI-Enhanced Translation**: Optional integration with local or remote LLMs (e.g., OpenAI, Ollama, LM Studio) for context-aware translations.
+- 🌐 **Multilingual Support**: Auto-detects source languages and supports multiple target languages.
+- 🎨 **Customization**: Adjust font size, type, colors, opacity, and contrast for the overlay and translated text.
+- ✂️ **Snipping Tool**: Built-in tool for precise region selection.
+- 🖥️ **Modern UI**: Sleek, futuristic interface with animations and system tray integration.
+- ⚙️ **Flexible Settings**: Configure AI APIs, save window positions, and toggle click-through mode.
+- 💬 **AI Chat**: Interactive terminal for conversing with AI models.
 
 ---
 
 ## System Requirements
 
-- Windows 10/11
-- Python 3.8 
-- No GPU required (recommended for faster OCR)
-- Minimum 4 GB RAM (8 GB recommended)
+- **Operating System**: Windows 10/11, macOS, or Linux
+- **Python**: 3.8 or higher
+- **Hardware**:
+  - No GPU required (CPU-based OCR and translation)
+  - Minimum 4 GB RAM (8 GB recommended for AI features)
+- **Disk Space**: ~500 MB for dependencies and temporary files
 
 ---
 
 ## Installation
 
-1. Clone this repository or copy the files into a folder.
-2. Install dependencies:
+1. **Clone the Repository**:
+   ```bash
+   git clone <repository-url>
+   cd OverlayTranslate
+   ```
 
-```bash
-pip install -r requirements.txt
-```
+2. **Install Dependencies**:
+   Create a virtual environment (optional but recommended) and install the required packages:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-3. Make sure you have the following:
-   - A GGUF LLM model inside the `models/` folder (e.g. `Phi-3.1-mini-128k-instruct-Q4_K_M.gguf`)
-   - LibreTranslate installed and running on `http://127.0.0.1:5000`
+3. **Set Up LibreTranslate**:
+   - Install LibreTranslate locally for offline translation:
+     ```bash
+     pip install libretranslate
+     libretranslate --host 127.0.0.1 --port 5000
+     ```
+   - Ensure LibreTranslate is running on `http://127.0.0.1:5000` before starting the application.
 
-4. Run the application:
+4. **Optional - Configure AI Models**:
+   - For AI-enhanced translations or chat, configure an AI provider (OpenAI, Ollama, or LM Studio) via the *Settings > Configure AI API* menu.
+   - For local LLMs, ensure models like `llama3.2` (for Ollama) are installed and running locally.
 
-```bash
-python main.py
-```
+5. **Run the Application**:
+   ```bash
+   python otfull.py
+   ```
 
 ---
 
 ## Quick Usage
 
-- `F1`: Capture screen and translate
-- `F2`: Toggle click-through on the floating region
-- `F4`: Activate Snipping Tool
-- `F5`: Toggle high-contrast theme
-- `F6`: Open local LibreTranslate server
-- `F8`: Toggle translation enhancement (requires LLM)
-
-Language settings can be configured in the *Settings* menu.
+- **Hotkeys**:
+  - `F1`: Capture screen and translate
+  - `F2`: Toggle click-through mode for the capture region
+  - `F4`: Activate the snipping tool for custom region selection
+- **Menu Options**:
+  - *Settings > Source Language*: Set the source language (default: auto-detect)
+  - *Settings > Target Language*: Choose the target language (default: English)
+  - *Settings > Configure AI API*: Set up AI providers for enhanced translations
+  - *Tools > Pop Out Live Translation*: Display live translations in a separate window
+  - *Tools > Chat with AI*: Open an interactive AI chat terminal
+- **System Tray**:
+  - Minimize to tray for background operation
+  - Restore or exit via the tray icon
 
 ---
 
@@ -64,12 +92,13 @@ Language settings can be configured in the *Settings* menu.
 
 ```
 OverlayTranslate/
-├── db/ (generated at runtime)
 ├── assets/
-│   ├── icon.png
-├── window_positions.json (generated at runtime)
-├── Support/ (generated at runtime on Desktop)
-└── your_script.py
+│   ├── icons/              # Icons for buttons (e.g., capture.svg, live.svg)
+│   └── icon.png            # System tray icon
+├── Support/                # Runtime folder on Desktop for captures and translations
+├── window_positions.json   # Stores window positions and settings (generated)
+├── otfull.py               # Main application script
+└── requirements.txt        # Dependency list
 ```
 
 ---
@@ -77,36 +106,54 @@ OverlayTranslate/
 ## requirements.txt
 
 ```
-PySide6
-paddlepaddle
-paddleocr
-Pillow
-opencv-python
-langdetect
-requests
-libretranslate
-numpy
-keyring
-
+PySide6>=6.0.0
+paddlepaddle>=2.5.0
+paddleocr>=2.7.0
+Pillow>=10.0.0
+opencv-python>=4.8.0
+langdetect>=1.0.9
+requests>=2.31.0
+libretranslate>=1.5.0
+numpy>=1.24.0
+keyring>=24.2.0
 ```
 
 ---
 
 ## Additional Notes
 
-- Captures and translations are stored temporarily in the `Support` folder on your desktop.
-- The AI API is optional, but it can improve translation quality based on context.
-- It is strongly recommended to run LibreTranslate locally for full offline functionality.
+- **Temporary Files**: Captures and translated images are saved in the `~/Desktop/Support` folder and deleted on application exit.
+- **AI Translation**: Requires configuration of an AI provider (e.g., OpenAI with an API key or Ollama running locally). AI translations are disabled during live capture for performance.
+- **Font Customization**: Choose from system fonts like Roboto, MS YaHei (Chinese/Japanese), or Malgun Gothic (Korean) for translated text.
+- **Performance Tips**:
+  - Use a GPU for faster OCR if available (configure PaddleOCR with `use_gpu=True`).
+  - For local AI models, ensure sufficient RAM (16 GB+ for large models).
+- **Troubleshooting**:
+  - Ensure LibreTranslate is running before launching the app.
+  - Check logs in `overlay_translate.log` for errors.
+  - Verify font paths in `otfull.py` match your system.
 
 ---
 
 ## License
 
-This project is for personal use only. Do not redistribute without permission from the original author.
+This project is for personal use only. Redistribution or commercial use is prohibited without explicit permission from the author.
 
 ---
 
 ## Contact
 
-Andrea - Master Hobby
+Andrea - Master Hobby  
+For support or inquiries, open an issue on the repository or contact the author directly.
 
+---
+
+### Changelog
+
+- **v1.0 (Initial Release)**:
+  - Offline OCR and translation
+  - Live and static capture modes
+  - Customizable UI with system tray support
+  - AI integration for enhanced translations and chat
+
+---
