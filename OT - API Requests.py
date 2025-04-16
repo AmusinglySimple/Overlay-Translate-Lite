@@ -1537,7 +1537,7 @@ class ControlWindow(QMainWindow):
     def closeApplication(self):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Confirm Exit")
-        msg_box.setText("Are you sure you want to exit Overlay Translate?")
+        msg_box.setText("Are you sure you want to exit Overlay Translate? Support folder on your desktop will be deleted.")
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg_box.setDefaultButton(QMessageBox.No)
         msg_box.setStyleSheet("""
@@ -1611,7 +1611,14 @@ class ControlWindow(QMainWindow):
         self.capture_widget.close()
         if self.tray_icon:
             self.tray_icon.hide()
-        logging.info(f"Support folder retained at {SUPPORT_FOLDER}")
+        
+        # Delete the Support folder
+        if os.path.exists(SUPPORT_FOLDER):
+            try:
+                shutil.rmtree(SUPPORT_FOLDER, ignore_errors=True)
+                logging.info(f"Support folder deleted at {SUPPORT_FOLDER}")
+            except Exception as e:
+                logging.error(f"Failed to delete Support folder: {e}")
 
     def load_geometry(self):
         positions = load_window_positions()
@@ -2106,38 +2113,90 @@ class SnippingTool(QWidget):
     def __init__(self, capture_widget):
         super().__init__()
         self.capture_widget = capture_widget
-        self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setGeometry(QApplication.primaryScreen().geometry())
-        self.setWindowOpacity(0.4)
-        self.begin = QPoint()
-        self.end = QPoint()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setCursor(Qt.CrossCursor)
+        self.selection_rect = QRect()
+        self.dragging = False
+        self.animation_timer = QTimer(self)
+        self.animation_timer.timeout.connect(self.updateGlow)
+        self.glow_phase = 0
+        # Do not start animation or show widget until explicitly activated
+        self.setVisible(False)
+
+    def resetOverlay(self):
+        # Cover all screens (multi-monitor)
+        desktop = QApplication.primaryScreen().virtualGeometry()
+        self.setGeometry(desktop)
+        self.selection_rect = QRect()
+        self.dragging = False
+        self.glow_phase = 0
+        # Start animation only when shown
+        self.animation_timer.start(30)
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setPen(QPen(QColor('#00ffcc'), 3))
-        painter.setBrush(QColor(0, 255, 204, 80))
-        painter.drawRect(QRect(self.begin, self.end))
+        painter.setRenderHint(QPainter.Antialiasing)
+        # Dim the background
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        # Draw selection rectangle if dragging
+        if not self.selection_rect.isNull():
+            # Animated glow effect
+            glow_color = QColor(0, 255, 204, 180 + int(50 * abs(math.sin(self.glow_phase))))
+            pen = QPen(glow_color, 4)
+            painter.setPen(pen)
+            painter.setBrush(QColor(0, 255, 204, 60))
+            painter.drawRoundedRect(self.selection_rect, 12, 12)
+            # Draw dashed border for extra style
+            dash_pen = QPen(QColor(255, 255, 255, 180), 2, Qt.DashLine)
+            painter.setPen(dash_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(self.selection_rect, 12, 12)
+
+    def updateGlow(self):
+        self.glow_phase += 0.15
+        if self.glow_phase > 2 * math.pi:
+            self.glow_phase = 0
+        if not self.selection_rect.isNull():
+            self.update()
 
     def mousePressEvent(self, event):
-        self.begin = event.pos()
-        self.end = self.begin
-        self.update()
+        if event.button() == Qt.LeftButton:
+            self.origin = event.pos()
+            self.selection_rect = QRect(self.origin, self.origin)
+            self.dragging = True
+            self.update()
 
     def mouseMoveEvent(self, event):
-        self.end = event.pos()
-        self.update()
+        if self.dragging:
+            self.selection_rect = QRect(self.origin, event.pos()).normalized()
+            self.update()
 
     def mouseReleaseEvent(self, event):
-        rect = QRect(self.begin, self.end).normalized()
+        if event.button() == Qt.LeftButton and self.dragging:
+            self.dragging = False
+            if self.selection_rect.width() > 10 and self.selection_rect.height() > 10:
+                self.takeSnip()
+            self.selection_rect = QRect()
+            self.hide()
+
+    def takeSnip(self):
+        # Grab the selected area from the screen
         screen = QApplication.primaryScreen()
+        geo = self.geometry()
+        rect = self.selection_rect.translated(geo.x(), geo.y())
         screenshot = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         fileName = os.path.join(SUPPORT_FOLDER, f"snip_{timestamp}.png")
         screenshot.save(fileName, format='PNG', quality=95)
         self.capture_widget.translateAndDisplay(fileName)
         self.capture_widget.show()
-        self.hide()
 
+    def showEvent(self, event):
+        self.resetOverlay()
+        super().showEvent(event)
+                        
 class ChatWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
