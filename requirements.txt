@@ -1,6 +1,6 @@
 PySide6
 paddlepaddle
-paddleocr>
+paddleocr
 Pillow
 opencv-python
 langdetect
