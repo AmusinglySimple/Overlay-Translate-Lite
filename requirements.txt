@@ -1,7 +1,10 @@
-PyQt5
+PySide6
+paddlepaddle
+paddleocr>
 Pillow
 opencv-python
-numpy
-paddleocr
 langdetect
-llama-cpp-python
+requests
+libretranslate
+numpy
+keyring
