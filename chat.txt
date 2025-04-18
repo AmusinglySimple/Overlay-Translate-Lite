@@ -1,3 +1,5 @@
+https://chatgpt.com/share/68029f5e-d14c-800b-998b-8471aafe0cb9
+
 Perfect — here's a **step-by-step guide to enable AVX in VirtualBox** (as much as it can be), so your VM can work with **PaddlePaddle** and `libpaddle.dll`.
 
 ---
