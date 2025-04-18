@@ -113,6 +113,10 @@ requests>=2.31.0
 libretranslate>=1.5.0
 numpy>=1.24.0
 keyring>=24.2.0
+pip uninstall paddlepaddle -y
+
+pip install https://paddle-wheel.bj.bcebos.com/2.5.0/cpu/noavx/paddlepaddle-2.5.0-cp38-cp38-win_amd64.whl
+
 ```
 
 ---
