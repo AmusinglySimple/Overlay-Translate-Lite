@@ -169,6 +169,20 @@ def get_system_font_path(font_name):
         return default_font
     return font_path
 
+def choose_font_for_text(text, default_font="Roboto", font_size=24):
+    # Detect Unicode ranges for script-specific fonts
+    if any('\u4e00' <= c <= '\u9fff' for c in text):  # Chinese characters
+        return QFont("Noto Sans CJK SC", font_size)
+    elif any('\u3040' <= c <= '\u309F' for c in text):  # Japanese Hiragana
+        return QFont("Noto Sans CJK JP", font_size)
+    elif any('\u30A0' <= c <= '\u30FF' for c in text):  # Japanese Katakana
+        return QFont("Noto Sans CJK JP", font_size)
+    elif any('\uAC00' <= c <= '\uD7AF' for c in text):  # Korean Hangul
+        return QFont("Noto Sans CJK KR", font_size)
+    else:
+        return QFont(default_font, font_size)
+
+
 def initialize_paddle_ocr(lang='en'):
     global paddle_ocr
     try:
@@ -591,7 +605,10 @@ class LiveTranslationWindow(QDialog):
         self.setGraphicsEffect(shadow)
 
     def updateTranslation(self, text):
-        self.translation_label.setText(text.replace('\n', ' ').strip())
+        flat_text = text.replace('\n', ' ').strip()
+        self.translation_label.setText(flat_text)
+        self.translation_label.setFont(choose_font_for_text(flat_text, font_size=20))
+
 
     def load_geometry(self):
         positions = load_window_positions()
