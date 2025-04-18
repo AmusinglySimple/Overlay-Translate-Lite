@@ -1,0 +1,93 @@
+Perfect — here's a **step-by-step guide to enable AVX in VirtualBox** (as much as it can be), so your VM can work with **PaddlePaddle** and `libpaddle.dll`.
+
+---
+
+## ✅ Step 1: Check if your **host CPU supports AVX**
+
+1. On your **host machine**, open a terminal or Command Prompt.
+2. Run:
+```bash
+wmic cpu get Caption, DeviceID, Name, NumberOfCores, MaxClockSpeed, DataWidth
+```
+
+3. Then run:
+```bash
+wmic cpu get InstructionSet
+```
+
+Or better, install [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html) and look for `AVX`, `AVX2` under the **Instructions** field.
+
+If you don’t see AVX listed → your **CPU doesn’t support it**.
+
+---
+
+## ✅ Step 2: Enable Nested Virtualization (Intel VT-x or AMD-V)
+
+1. **Shut down** your VirtualBox VM completely (not suspended).
+2. Open **VirtualBox Manager**.
+3. Select your VM > Click **Settings**.
+4. Go to **System > Acceleration**:
+   - ✅ Make sure **VT-x/AMD-V** is enabled.
+   - ✅ Enable **Nested Paging**.
+5. Click **OK**.
+
+---
+
+## ✅ Step 3: Force AVX passthrough (if supported)
+
+VirtualBox doesn't offer a checkbox for AVX passthrough, but you can **try forcing it** using the command line.
+
+1. Open a terminal or **Command Prompt**.
+2. Run this (replace `YourVMName` with the actual VM name):
+
+```bash
+VBoxManage setextradata "YourVMName" VBoxInternal/CPUM/IsaExts/AVX 1
+VBoxManage setextradata "YourVMName" VBoxInternal/CPUM/IsaExts/AVX2 1
+```
+
+⚠ These commands **don’t always work** — it depends on:
+- Your host CPU supporting AVX
+- VirtualBox version (6.1+ is best)
+- Guest OS being 64-bit
+
+---
+
+## ✅ Step 4: Check if AVX is exposed in the guest (your VM)
+
+Now **boot into your VM** and check if AVX is visible:
+
+### Option A: Using Python
+
+```bash
+pip install cpuid
+python -c "import cpuid; print(cpuid.CPUID().get_features())"
+```
+
+### Option B: Using CMD in VM
+
+```bash
+wmic cpu get Caption, Name, ProcessorId, NumberOfCores, Architecture
+```
+
+Or install [CPU-Z inside your VM](https://www.cpuid.com/softwares/cpu-z.html) and look for `AVX`, `AVX2`.
+
+---
+
+## ❌ If it still doesn’t show AVX…
+
+- **VirtualBox does not currently support full AVX passthrough** by default.
+- Even with the workaround, it often **does not work**, especially with Windows guests.
+
+---
+
+## 🟡 Workaround (Recommended)
+
+Use the **non-AVX version of PaddlePaddle**, but run it **outside the VM** on your **host** machine — it’s the cleanest and most compatible setup.
+
+If that’s not possible, we can **swap PaddleOCR with Tesseract or EasyOCR**, which do not require AVX.
+
+---
+
+Would you prefer I help you:
+- ✅ Get a PaddleOCR alternative working in the VM?
+- ✅ Or give you a fully working offline `.exe` you can run outside the VM?
