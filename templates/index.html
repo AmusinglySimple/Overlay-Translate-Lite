@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Futuristic Translator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span class="glow">OverlayTranslate</span> <span class="wireframe">Server</span></h1>
+            <button id="menu-toggle" class="menu-btn">☰ Models</button>
+        </header>
+
+        <main>
+            <div class="translation-grid">
+                <div class="language-selector">
+                    <label for="source-language">Source Language:</label>
+                    <select id="source-language" name="source-language">
+                        <!-- Options populated by JS -->
+                    </select>
+                </div>
+                <div class="language-selector">
+                    <label for="target-language">Target Language:</label>
+                    <select id="target-language" name="target-language">
+                        <!-- Options populated by JS -->
+                    </select>
+                </div>
+                <div class="text-area input-area">
+                    <textarea id="input-text" placeholder="Enter text to translate..."></textarea>
+                </div>
+                <div class="text-area output-area">
+                    <textarea id="output-text" placeholder="Translation will appear here..." readonly></textarea>
+                     <div id="translation-status" class="status-message"></div>
+                </div>
+            </div>
+            <button id="translate-button" class="translate-btn">Translate</button>
+        </main>
+
+        <!-- Menu Sidebar/Modal -->
+        <div id="model-menu" class="menu-sidebar">
+            <button id="close-menu" class="close-btn">×</button>
+            <h2>Model Management</h2>
+
+            <div id="download-progress-container" class="progress-container" style="display: none;">
+                <p id="progress-status">Downloading model...</p>
+                <div class="progress-bar-wrapper">
+                     <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                 <p id="progress-message" class="progress-details"></p>
+            </div>
+
+            <div class="model-section">
+                <h3>Available Models</h3>
+                <div id="available-models-list" class="model-list">
+                    <!-- Populated by JS -->
+                    <p>Loading available models...</p>
+                </div>
+            </div>
+
+            <div class="model-section">
+                <h3>Installed Models</h3>
+                <div id="installed-models-list" class="model-list">
+                    <!-- Populated by JS -->
+                    <p>Loading installed models...</p>
+                </div>
+            </div>
+        </div>
+        <div id="menu-overlay" class="menu-overlay"></div>
+
+    </div>
+
+    <footer>
+        <p></p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
