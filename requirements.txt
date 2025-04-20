@@ -1,10 +1,21 @@
+# Core GUI and Application Logic
 PySide6
-paddlepaddle
-paddleocr
+requests
+keyring
+
+# Image Processing and OCR
 Pillow
 opencv-python
-langdetect
-requests
-libretranslate
 numpy
-keyring
+paddleocr
+paddlepaddle # Note: Install the correct version (CPU or GPU) for your system. See PaddlePaddle docs.
+
+# Language Detection
+langdetect-py
+
+# Backend Translation Server
+Flask
+argostranslate
+
+# Optional: For AI Streaming (some providers like OpenAI/LMStudio)
+sseclient-py
