@@ -1032,8 +1032,10 @@ class AITranslationWorker(QThread):
     translation_complete = Signal(str) # Emits the final translated string
     error = Signal(str) # Emits error messages
 
-    def __init__(self, text, source_language, target_language, num_lines, parent=None):
+    def __init__(self, message, target_lang, text, source_language, target_language, num_lines, parent=None):
         super().__init__(parent)
+        self.message = message
+        self.target_lang = target_lang
         self.text = text
         self.source_language = source_language # Keep for potential future use in prompt
         self.target_language = target_language
@@ -4118,7 +4120,7 @@ class ChatWindow(QDialog):
             self.update_user_input_style()
             logging.debug(f"Chat font size decreased to {self.font_size}")
 
-    def load_geometry(self):
+    def load_geometry(self, positions):
         positions = load_window_positions()
         if 'ChatWindow' in positions:
             try:
@@ -4146,12 +4148,12 @@ class ChatWindow(QDialog):
 
 
 # --- AIStreamingWorker Thread ---
-# (Keep AIStreamingWorker class as it is - no changes requested there)
 class AIStreamingWorker(QThread):
-    text_chunk = Signal(str) # Emits chunks of text as they arrive
-    finished_stream = Signal(str) # Emits the full concatenated response on success
-    error_stream = Signal(str) # Emits error message on failure
+    text_chunk = Signal(str)
+    finished_stream = Signal(str)
+    error_stream = Signal(str)
 
+    # --- MODIFIED FOR DEBUGGING ---
     def __init__(self, message, target_language, parent=None):
         super().__init__(parent)
         self.message = message
@@ -4346,175 +4348,6 @@ class AIStreamingWorker(QThread):
 # --- Theme Related Classes (ThemeDialog, ColorBarPicker) ---
 # Inside class ThemeDialog(QDialog):
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Theme Settings")
-        self.setMinimumWidth(500)
-        # Inherits style from global theme
-
-        # Use a deep copy to avoid modifying the global theme until save
-        self.current_local_theme = json.loads(json.dumps(current_theme)) # Deep copy trick
-        self.layout = QVBoxLayout(self) # Assigns layout to 'self' immediately
-        self.color_pickers = {}
-
-        grid_layout = QtWidgets.QGridLayout()
-        row, col = 0, 0
-        # Use the new tooltip method
-        for key, (name, tooltip) in self.get_user_friendly_names_and_tooltips().items():
-            if key not in self.current_local_theme["colors"]:
-                logging.warning(f"Theme key '{key}' not found in current_local_theme during dialog init.")
-                continue # Skip if key missing in theme data
-
-            label = QLabel(f"{name}:")
-            label.setToolTip(tooltip) # <-- Add Tooltip
-
-            color_button = QPushButton()
-            color_button.setFixedSize(80, 25)
-            # Ensure initial color is valid before updating button
-            initial_color_str = self.current_local_theme["colors"].get(key, "#FFFFFFFF") # Default to white if missing
-            if not QColor(initial_color_str).isValid():
-                 logging.warning(f"Invalid initial color '{initial_color_str}' for key '{key}', defaulting button.")
-                 initial_color_str = "#FFFFFFFF" # Use opaque white fallback for button display
-
-            self.update_button_color(color_button, initial_color_str)
-            color_button.clicked.connect(lambda k=key, b=color_button: self.pick_color(k, b))
-
-            grid_layout.addWidget(label, row, col * 2)
-            grid_layout.addWidget(color_button, row, col * 2 + 1)
-
-            col += 1
-            if col >= 2: col = 0; row += 1
-            self.color_pickers[key] = color_button
-
-        self.layout.addLayout(grid_layout)
-        self.layout.addStretch()
-
-        button_layout = QHBoxLayout()
-        reset_btn = QPushButton("Reset to Default")
-        save_btn = QPushButton("Save & Apply")
-        cancel_btn = QPushButton("Cancel")
-        reset_btn.clicked.connect(self.reset_theme)
-        save_btn.clicked.connect(self.save_and_apply)
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(reset_btn)
-        button_layout.addStretch()
-        button_layout.addWidget(cancel_btn)
-        button_layout.addWidget(save_btn)
-        self.layout.addLayout(button_layout)
-
-    # Renamed and expanded this method
-    def get_user_friendly_names_and_tooltips(self):
-        # Map internal keys to (User-friendly Name, Tooltip Text)
-        return {
-            "bg_main": ("Main Background", "Main window/dialog background color."),
-            "bg_groupbox": ("Group Box BG", "Background color for group boxes."),
-            "bg_titlebar": ("Group Title BG", "Background for group box titles."),
-            "bg_input": ("Input BG", "Background for text inputs, combo boxes, progress bars."),
-            "bg_tooltip": ("Tooltip BG", "Background color for tooltips."),
-            "bg_menu": ("Menu BG", "Background for menus (main menu bar, context menus)."),
-            "bg_menu_item_sel": ("Menu Sel BG", "Background color for selected menu items."),
-
-            "text_light": ("Primary Text", "Main text color for labels, etc."),
-            "text_accent": ("Accent Text", "Highlight/accent text color (e.g., labels, group titles)."),
-            "text_secondary": ("Secondary Text", "Secondary accent color (e.g., slider handle)."),
-            "text_button": ("Button Text", "Text color on buttons."),
-            "text_disabled": ("Disabled Text", "Text color for disabled widgets."),
-            "text_tooltip": ("Tooltip Text", "Text color for tooltips."),
-
-            "border_main": ("Main Border", "Border around the main window (often transparent)."),
-            "border_accent": ("Accent Border", "Highlight border color (e.g., focused inputs, capture overlay)."),
-            "border_medium": ("Medium Border", "Standard border color (e.g., checkboxes, tooltips)."),
-            "border_light": ("Light Border", "Subtle border color (e.g., inputs, group boxes, progress)."),
-            "border_menu": ("Menu Border", "Border around menus."),
-
-            "grad_button_start": ("Button Grad Start", "Start color for button background gradient."),
-            "grad_button_end": ("Button Grad End", "End color for button background gradient."),
-            "grad_button_hover_start": ("Btn Hover Start", "Start color for button hover gradient."),
-            "grad_button_hover_end": ("Btn Hover End", "End color for button hover gradient."),
-            "grad_button_pressed": ("Btn Pressed BG", "Background color when button is pressed."),
-            "grad_slider_start": ("Slider Grad Start", "Start color for slider filled part gradient."),
-            "grad_slider_end": ("Slider Grad End", "End color for slider filled part gradient."),
-            "progress_chunk_start": ("Progress Start", "Start color for progress bar chunk gradient."),
-            "progress_chunk_end": ("Progress End", "End color for progress bar chunk gradient."),
-            "checkbox_checked": ("Checkbox Checked", "Background color for checked checkboxes."),
-        }
-
-    def update_button_color(self, button, color_str):
-        try:
-            # Ensure color_str is in #AARRGGBB format before passing to QColor
-            if isinstance(color_str, str) and color_str.startswith('#') and len(color_str) == 9:
-                color = QColor(color_str)
-            else:
-                 # Attempt conversion if needed, fallback if invalid
-                 temp_color = QColor(color_str)
-                 if temp_color.isValid():
-                     color = temp_color
-                 else:
-                     raise ValueError(f"Invalid format: {color_str}")
-
-            if color.isValid():
-                # Use HexArgb for consistency, ensure some visibility for transparent colors
-                display_alpha = max(color.alpha(), 100) # Ensure at least some opacity for preview
-                display_color = QColor(color.red(), color.green(), color.blue(), display_alpha)
-                button.setStyleSheet(f"background-color: {display_color.name(QColor.NameFormat.HexArgb)}; border: 1px solid #888;")
-            else:
-                # This path should ideally not be reached if input is validated
-                logging.warning(f"Button update called with invalid QColor derived from: {color_str}")
-                button.setStyleSheet("background-color: grey; border: 1px solid #888;")
-        except Exception as e:
-             logging.error(f"Error setting button color for input '{color_str}': {e}")
-             button.setStyleSheet("background-color: red; border: 1px solid #888;") # Error indicator
-
-    def pick_color(self, key, button):
-        current_color_str = self.current_local_theme["colors"].get(key, "#FFFFFFFF")
-        initial_color = QColor(current_color_str)
-        if not initial_color.isValid():
-            logging.warning(f"Invalid initial color '{current_color_str}' for key '{key}', using white.")
-            initial_color = QColor("#FFFFFFFF") # Opaque white
-
-        color_dialog = QColorDialog(initial_color, self)
-        color_dialog.setOptions(QColorDialog.ColorDialogOption.ShowAlphaChannel)
-        if color_dialog.exec():
-             color = color_dialog.selectedColor()
-             if color.isValid():
-                 # --- Ensure saved format is #AARRGGBB ---
-                 color_str = color.name(QColor.NameFormat.HexArgb)
-                 self.current_local_theme["colors"][key] = color_str
-                 self.update_button_color(button, color_str)
-
-
-    def reset_theme(self):
-        # Reset local copy to default
-        self.current_local_theme = json.loads(json.dumps(DEFAULT_THEME)) # Deep copy default
-        for key, button in self.color_pickers.items():
-            if key in self.current_local_theme["colors"]:
-                 self.update_button_color(button, self.current_local_theme["colors"][key])
-            else:
-                 # Handle case where default might miss a key (shouldn't happen)
-                 self.update_button_color(button, "#FF0000FF") # Red error indicator
-        QMessageBox.information(self, "Theme Reset", "Theme reset to default. Click 'Save & Apply' to confirm.")
-
-    def save_and_apply(self):
-        global current_theme
-        # Apply the changes from the local copy to the global theme
-        current_theme = json.loads(json.dumps(self.current_local_theme)) # Deep copy local to global
-        apply_theme() # Apply the new global theme visually
-
-        # --- Explicitly Save ALL settings ---
-        try:
-            # Load the current full state (positions etc.)
-            positions = load_window_positions()
-            # Update the 'theme' part with our confirmed changes
-            positions['theme'] = current_theme # Use the updated global theme
-            # Save the entire dictionary back
-            # Use the main save function directly (it now includes theme)
-            save_window_positions(positions)
-            logging.info("Theme explicitly saved along with other settings.")
-        except Exception as e:
-            logging.error(f"Failed to explicitly save theme settings: {e}", exc_info=True)
-            QMessageBox.warning(self, "Save Error", f"Could not save theme settings:\n{e}")
-
-        self.accept() # Close the dialog
 
 
 # --- TranslatedImageViewer Dialog ---
