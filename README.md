@@ -1,161 +1,113 @@
+# Overlay Translate 🌌
 
-# Overlay Translate
+Overlay Translate provides a seamless way to capture text directly from your screen using an overlay or snipping tool and instantly translate it using offline (Argos Translate) or online AI (OpenAI, Ollama, LM Studio) models.
 
-Overlay Translate is a powerful offline tool designed to capture on-screen text, translate it in real-time, and display translations in a customizable, non-intrusive overlay. Perfect for translating text in videos, games, software, documents, or any on-screen content without an internet connection.
+**(Optional: Add a Screenshot or GIF Here)**
+<!-- ![Overlay Translate Screenshot](link/to/your/screenshot.png) -->
 
----
+## ✨ Features
 
-## Features
+*   **Screen Capture:** Capture text within a defined overlay area (`F1`).
+*   **Snipping Tool:** Select a specific screen region for capture (`F4`).
+*   **Live Translation:** Continuously capture and translate text in the overlay area (`F3`).
+*   **Offline Translation:** Uses a local [Argos Translate](https://www.argosopentech.com/) backend (via Flask) for privacy-focused translation.
+*   **AI Translation:** Integrate with OpenAI, Ollama, or LM Studio APIs for advanced translation (requires configuration).
+*   **AI Chat:** Open a dedicated chat window to interact with your configured AI model (`Ctrl+T`).
+*   **Customizable Overlay:**
+    *   Adjustable position and size.
+    *   Variable opacity (`Opacity Slider`).
+    *   Click-through mode (`F2` or low opacity).
+*   **Theming:** Customize the application's appearance via Theme Settings.
+*   **Font Selection:** Choose fonts and sizes for translated text display in the viewer.
+*   **Pop-out Window:** Display live translations in a separate, movable window.
+*   **Tray Icon:** Minimize the application to the system tray for easy access.
+*   **Support Folder:** Automatically saves captured images, translated images (with text overlay), and translation details (`.txt`) to a dedicated folder on your Desktop.
 
-- ✨ **Live Translation**: Stream translations in real-time from a floating capture region.
-- 📸 **Static Capture**: Take instant screenshots for quick translations.
-- 🔍 **Offline OCR**: Powered by PaddleOCR for accurate text recognition.
-- ⚖ **Offline Translation**: Uses LibreTranslate for reliable, internet-free translations.
-- 🤖 **AI-Enhanced Translation**: Optional integration with local or remote LLMs (e.g., OpenAI, Ollama, LM Studio) for context-aware translations.
-- 🌐 **Multilingual Support**: Auto-detects source languages and supports multiple target languages.
-- 🎨 **Customization**: Adjust font size, type, colors, opacity, and contrast for the overlay and translated text.
-- ✂️ **Snipping Tool**: Built-in tool for precise region selection.
-- 🖥️ **Modern UI**: Sleek, futuristic interface with animations and system tray integration.
-- ⚙️ **Flexible Settings**: Configure AI APIs, save window positions, and toggle click-through mode.
-- 💬 **AI Chat**: Interactive terminal for conversing with AI models.
+## 💻 Technology Stack
 
----
+*   **Python:** 3.8
+*   **GUI:** PySide6 (Qt 6)
+*   **OCR:** PaddleOCR
+*   **Offline Translation:** Argos Translate, Flask
+*   **Core Libraries:** Pillow, OpenCV-Python, Requests, NumPy, Langdetect-py, Keyring
 
-## System Requirements
+## 🚀 Installation
 
-- **Operating System**: Windows 10/11, macOS, or Linux
-- **Python**: 3.8 
-- **Hardware**:
-  - No GPU required (CPU-based OCR and translation)
-  - Minimum 4 GB RAM (8 GB recommended for AI features)
-- **Disk Space**: ~500 MB for dependencies and temporary files
+1.  **Prerequisites:**
+    *   Python 3.8 or higher installed.
+    *   `pip` (Python package installer).
+    *   Git (for cloning).
 
----
+2.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/your-username/overlay-translate.git # Replace with your repo URL
+    cd overlay-translate
+    ```
 
-## Installation
+3.  **Create a Virtual Environment (Recommended):**
+    ```bash
+    python -m venv venv
+    # On Windows:
+    .\venv\Scripts\activate
+    # On macOS/Linux:
+    source venv/bin/activate
+    ```
 
-1. **Clone the Repository**:
-   ```bash
-   git clone <repository-url>
-   cd OverlayTranslate
-   ```
+4.  **Install Dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+    *   **Note on PaddlePaddle:** The `requirements.txt` includes the standard `paddlepaddle`. If you have a compatible NVIDIA GPU and want GPU acceleration for OCR (which can be significantly faster), you might need to install the GPU version separately. Refer to the [PaddlePaddle installation guide](https://www.paddlepaddle.org.cn/install/quick) for specific instructions based on your CUDA version.
 
-2. **Install Dependencies**:
-   Create a virtual environment (optional but recommended) and install the required packages:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+5.  **Argos Translate Models:** Language models for offline translation are typically downloaded automatically by the backend server (`app.py`) on first use or can be managed via the server's web UI (see Usage).
 
-3. **Set Up LibreTranslate**:
-   - Install LibreTranslate locally for offline translation:
-     ```bash
-     pip install libretranslate
-    
-     ```
-   - LibreTranslate will be running only during the session on `http://127.0.0.1:5000` after starting the application.
+## ▶️ Usage
 
-4. **Optional - Configure AI Models**:
-   - For AI-enhanced translations or chat, configure an AI provider (OpenAI, Ollama, or LM Studio) via the *Settings > Configure AI API* menu.
-   - For local LLMs, ensure models like `llama3.2` (for Ollama) are installed and running locally.
+1.  **Run the Application:**
+    ```bash
+    python otfull2.py
+    ```
+    *   The main control window and the semi-transparent capture overlay will appear.
+    *   The local Flask translation server will start in the background.
 
-5. **Run the Application**:
-   ```bash
-   python OT - API Requests.py
-   ```
+2.  **Position the Overlay:** Drag and resize the overlay window to cover the area of the screen you want to capture text from.
 
----
+3.  **Capture and Translate:**
+    *   **Single Capture (`F1`):** Press `F1` or click the "Capture" button. The text within the overlay will be captured and translated. A viewer window will pop up showing the original image with the translated text overlaid. Close the viewer to automatically save the translated image and a `.txt` file with details to the `Support` folder on your Desktop.
+    *   **Snipping Tool (`F4`):** Press `F4` or click "Snip". The screen will dim. Click and drag to select a specific region. Release the mouse to capture and translate that region. The viewer window will appear as with a normal capture. Press `Esc` or right-click to cancel snipping.
+    *   **Live Mode (`F3`):** Press `F3` or click "Live" to toggle continuous capture and translation of the overlay area. The translation will appear in the "Live Translation Preview" section of the control window or in the pop-out window if activated. Press `F3` again to stop. *(Note: AI translation is disabled in Live Mode)*.
 
-## Quick Usage
+4.  **Overlay Controls:**
+    *   **Opacity:** Use the slider in the control window to adjust the overlay's transparency.
+    *   **Click-Through (`F2`):** Press `F2` or click the toggle button to make the overlay ignore mouse clicks (allowing interaction with windows underneath). Click-through is automatically enabled at very low opacity levels.
 
-- **Hotkeys**:
-  - `F1`: Capture screen and translate
-  - `F2`: Toggle click-through mode for the capture region
-  - `F4`: Activate the snipping tool for custom region selection
-- **Menu Options**:
-  - *Settings > Source Language*: Set the source language (default: auto-detect)
-  - *Settings > Target Language*: Choose the target language (default: English)
-  - *Settings > Configure AI API*: Set up AI providers for enhanced translations
-  - *Tools > Pop Out Live Translation*: Display live translations in a separate window
-  - *Tools > Chat with AI*: Open an interactive AI chat terminal
-- **System Tray**:
-  - Minimize to tray for background operation
-  - Restore or exit via the tray icon
+5.  **AI Configuration (Optional):**
+    *   Go to `Settings -> AI Configuration -> Configure AI Provider...` in the menu bar.
+    *   Select your provider (OpenAI, Ollama, LM Studio) and enter the required details (API Key, Endpoint). API keys are stored securely in your system's keyring, **not** in the configuration file.
+    *   Enable AI translation using the toggle button in the main window or via `Settings -> AI Configuration -> Toggle AI Translation`. (Not available in Live Mode).
 
----
+6.  **AI Chat (`Ctrl+T`):**
+    *   Open the chat window to directly converse with your configured AI model. Requires AI to be configured first.
 
-## Folder Structure
+7.  **Translation Server UI:**
+    *   Go to `Settings -> Open Translation Server UI`. This will open `http://127.0.0.1:5000` in your web browser, where you can manage installed Argos Translate language models.
 
-```
-OverlayTranslate/
-├── assets/
-│   ├── icons/              # Icons for buttons (e.g., capture.svg, live.svg)
-│   └── icon.png            # System tray icon
-├── Support/                # Runtime folder on Desktop for captures and translations
-├── window_positions.json   # Stores window positions and settings (generated)
-├── otfull.py               # Main application script
-└── requirements.txt        # Dependency list
-```
+8.  **Support Folder:**
+    *   Access captured/translated images and logs via `Help -> Open Support Folder`.
 
----
+9.  **Minimize/Exit:**
+    *   Click the minimize button or `File -> Minimize to Tray` to hide windows and keep the app running in the system tray. Click the tray icon to restore.
+    *   Use `File -> Exit` or the tray icon's Exit option to close the application properly. You will be asked if you want to delete the `Support` folder contents upon exit.
 
-## requirements.txt
+## ⚙️ Configuration
 
-```
-PySide6>=6.0.0
-paddlepaddle>=2.5.0
-paddleocr>=2.7.0
-Pillow>=10.0.0
-opencv-python>=4.8.0
-langdetect>=1.0.9
-requests>=2.31.0
-libretranslate>=1.5.0
-numpy>=1.24.0
-keyring>=24.2.0
-pip uninstall paddlepaddle -y
+*   Window positions, theme settings, viewer preferences, and AI provider info (excluding keys) are saved in `window_positions.json` in the application's root directory.
+*   Captured images, translated images, text data, and logs are stored in the `Support` folder created on your Desktop.
 
-pip install https://paddle-wheel.bj.bcebos.com/2.5.0/cpu/noavx/paddlepaddle-2.5.0-cp38-cp38-win_amd64.whl
-python -c "import paddle; print(paddle.utils.run_check())"
+## 🤝 Contributing
 
-```
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or suggestions.
 
----
+## 📜 License
 
-## Additional Notes
-
-- **Temporary Files**: Captures and translated images are saved in the `~/Desktop/Support` folder and deleted on application exit.
-- **AI Translation**: Requires configuration of an AI provider (e.g., OpenAI with an API key or Ollama running locally). AI translations are disabled during live capture for performance.
-- **Font Customization**: Choose from system fonts like Roboto, MS YaHei (Chinese/Japanese), or Malgun Gothic (Korean) for translated text.
-- **Performance Tips**:
-  - Use a GPU for faster OCR if available (configure PaddleOCR with `use_gpu=True`).
-  - For local AI models, ensure sufficient RAM (16 GB+ for large models).
-- **Troubleshooting**:
-  - Ensure LibreTranslate is running before launching the app.
-  - Check logs in `overlay_translate.log` for errors.
-  - Verify font paths in `otfull.py` match your system.
-
----
-
-## License
-
-This project is for personal use only. Redistribution or commercial use is prohibited without explicit permission from the author.
-
----
-
-## Contact
-
-Andrea - Master Hobby  
-For support or inquiries, open an issue on the repository or contact the author directly.
-
----
-
-### Changelog
-
-- **v1.0 (Initial Release)**:
-  - Offline OCR and translation
-  - Live and static capture modes
-  - Customizable UI with system tray support
-  - AI integration for enhanced translations and chat
-
----
+This project is licensed under the MIT License - see the LICENSE file for details (You'll need to create a LICENSE file, typically containing the standard MIT license text).
