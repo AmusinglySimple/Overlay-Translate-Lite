@@ -65,7 +65,7 @@ Overlay Translate provides a seamless way to capture text directly from your scr
 
 1.  **Run the Application:**
     ```bash
-    python otfull2.py
+    python OverlayTranslateNewServer.py
     ```
     *   The main control window and the semi-transparent capture overlay will appear.
     *   The local Flask translation server will start in the background.
