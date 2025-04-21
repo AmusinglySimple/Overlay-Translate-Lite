@@ -58,8 +58,8 @@ Overlay Translate provides a seamless way to capture text directly from your scr
     pip install -r requirements.txt
     ```
 
-Folder Structure 
-
+**Folder Structure** 
+```bash
 overlay-translate/
 ├── assets/
 │   ├── icons/
@@ -90,7 +90,7 @@ overlay-translate/
 ├── app.py                  # Your Flask application (unchanged)
 ├── main.py                 # Main application entry point
 └── requirements.txt        # Project dependencies
-
+  ```
 
     
     *   **Note on PaddlePaddle:** The `requirements.txt` includes the standard `paddlepaddle`. If you have a compatible NVIDIA GPU and want GPU acceleration for OCR (which can be significantly faster), you might need to install the GPU version separately. Refer to the [PaddlePaddle installation guide](https://www.paddlepaddle.org.cn/install/quick) for specific instructions based on your CUDA version.
