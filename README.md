@@ -57,6 +57,43 @@ Overlay Translate provides a seamless way to capture text directly from your scr
     ```bash
     pip install -r requirements.txt
     ```
+    ```
+Folder Structure 
+
+overlay-translate/
+├── assets/
+│   ├── icons/
+│   │   ├── capture.svg
+│   │   ├── click.svg
+│   │   ├── launch.svg
+│   │   ├── live.svg
+│   │   ├── send.svg
+│   │   ├── snip.svg
+│   │   ├── stop.svg
+│   │   ├── zoom_in.svg
+│   │   └── zoom_out.svg
+│   └── icon.png
+├── gui/
+│   ├── __init__.py
+│   ├── control_window.py
+│   ├── capture_widget.py
+│   ├── snipping_tool.py
+│   ├── dialogs.py           # Contains Intro, Theme, Chat, Live, Viewer dialogs
+│   ├── custom_widgets.py    # Contains ColorBarPicker, DraggableResizableWidget
+│   └── resource_monitor.py  # New widget for CPU/RAM
+├── utils/
+│   ├── __init__.py
+│   ├── config.py           # Constants, logging setup, theme defaults
+│   ├── helpers.py          # Font finding, config load/save, theme generation
+│   └── ocr_utils.py        # PaddleOCR initialization and management
+├── workers.py              # All QThread worker classes
+├── app.py                  # Your Flask application (unchanged)
+├── main.py                 # Main application entry point
+└── requirements.txt        # Project dependencies
+
+```
+
+    
     *   **Note on PaddlePaddle:** The `requirements.txt` includes the standard `paddlepaddle`. If you have a compatible NVIDIA GPU and want GPU acceleration for OCR (which can be significantly faster), you might need to install the GPU version separately. Refer to the [PaddlePaddle installation guide](https://www.paddlepaddle.org.cn/install/quick) for specific instructions based on your CUDA version.
 
 5.  **Argos Translate Models:** Language models for offline translation are typically downloaded automatically by the backend server (`app.py`) on first use or can be managed via the server's web UI (see Usage).
