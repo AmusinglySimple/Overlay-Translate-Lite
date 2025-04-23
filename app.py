@@ -1,40 +1,46 @@
+# app.py
 import os
+
+# --- Set environment variable FIRST ---
+# Get the directory of the current script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Define the project-local data directory
+project_argos_data_dir = os.path.join(script_dir, ".argos-translate-data")
+# Set the environment variable
+os.environ['ARGOSTRANSLATE_DATA_DIR'] = project_argos_data_dir
+# Ensure the directory exists (though the library might do this, it's safer)
+os.makedirs(os.path.join(project_argos_data_dir, "packages"), exist_ok=True)
+# --- END Set environment variable ---
+
+
 import time
 import json
 import threading
 from queue import Queue
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+# Imports for argostranslate should come *after* setting the environment variable
 import argostranslate.package
 import argostranslate.translate
 import argostranslate.settings
+# Removed: import argostranslate.cached_package
 import logging
 
-# Configure logging
-# Use a basic configuration for simplicity, or integrate with the main app's logging if preferred
-log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log_handler = logging.StreamHandler(sys.stdout) # Log Flask output to stdout
-log_handler.setFormatter(log_formatter)
-
-# Get the Flask logger and add our handler
-flask_logger = logging.getLogger('werkzeug') # Werkzeug is the default dev server
-flask_logger.setLevel(logging.INFO) # Or DEBUG for more verbosity
-# flask_logger.addHandler(log_handler) # Already logs to console by default
-
-# Configure our own app logging
-app_logger = logging.getLogger(__name__)
-app_logger.setLevel(logging.DEBUG) # Log debug messages from our app routes
-app_logger.addHandler(log_handler)
-app_logger.propagate = False # Prevent duplicate logging to root logger if main app also logs
+# Configure logging (set back to INFO if desired, or keep DEBUG)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuration ---
-script_dir = os.path.dirname(os.path.abspath(__file__))
-argos_data_dir = os.path.join(script_dir, ".argos-translate-data")
-argostranslate.settings.data_dir = argos_data_dir
-argostranslate.settings.package_data_dir = os.path.join(argos_data_dir, "packages")
-os.makedirs(argostranslate.settings.package_data_dir, exist_ok=True)
+# These lines *should* now be redundant because of the environment variable,
+# but we can keep them as a fallback or for clarity if desired.
+# argos_data_dir = os.path.join(script_dir, ".argos-translate-data")
+# argostranslate.settings.data_dir = argos_data_dir
+# argostranslate.settings.package_data_dir = os.path.join(argos_data_dir, "packages")
+# os.makedirs(argostranslate.settings.package_data_dir, exist_ok=True)
 
-app_logger.info(f"Argos Translate data directory: {argostranslate.settings.data_dir}")
-app_logger.info(f"Argos Translate package directory: {argostranslate.settings.package_data_dir}")
+# Log the directory Argos is actually using *after* settings/env vars are applied
+logging.info(f"Argos Translate effective data directory: {argostranslate.settings.data_dir}")
+logging.info(f"Argos Translate effective package directory: {argostranslate.settings.package_data_dir}")
+logging.info(f"Argos Translate data directory (from env): {os.environ.get('ARGOSTRANSLATE_DATA_DIR')}")
+
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -44,338 +50,315 @@ download_status = {}
 download_queue = Queue()
 download_thread = None
 
+# --- Global cache for available packages ---
+# This cache is still useful to avoid hitting the network index every time the menu is opened
+last_available_packages_cache = []
+
 # --- Helper Functions ---
 
 def get_installed_languages_formatted():
     """Gets installed languages suitable for frontend dropdowns."""
     try:
+        # load_installed_languages() no longer needs force=True
+        argostranslate.translate.load_installed_languages()
         installed = argostranslate.translate.get_installed_languages()
-        return sorted(
-            [{"code": lang.code, "name": lang.name} for lang in installed],
-            key=lambda x: x["name"]
-        )
+        logging.info(f"Found {len(installed)} installed language objects.")
+        formatted_list = []
+        for lang in installed:
+            if hasattr(lang, 'code') and hasattr(lang, 'name'):
+                formatted_list.append({"code": lang.code, "name": lang.name})
+            else:
+                logging.warning(f"Skipping installed language due to missing attributes: {lang}")
+        return sorted(formatted_list, key=lambda x: x["name"])
     except Exception as e:
-        app_logger.error(f"Error getting installed languages: {e}")
+        logging.error(f"Error getting installed languages: {e}", exc_info=True)
         return []
 
+# --- SIMPLIFIED get_installed_models_formatted ---
 def get_installed_models_formatted():
-    """Gets installed translation models."""
+    """Gets installed translation models, focusing only on essential codes."""
+    models = []
     try:
         packages = argostranslate.package.get_installed_packages()
-        models = []
-        for pkg in packages:
-            if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code'):
-                 models.append({
-                     "from_code": pkg.from_code,
-                     "to_code": pkg.to_code,
-                     "from_name": pkg.from_name,
-                     "to_name": pkg.to_name,
-                     "package_version": pkg.package_version,
-                     "argos_version": pkg.argos_version,
-                     "id": f"{pkg.from_code}_{pkg.to_code}"
-                 })
-        return sorted(models, key=lambda x: (x["from_name"], x["to_name"]))
-    except Exception as e:
-        app_logger.error(f"Error getting installed models: {e}")
-        return []
+        logging.info(f"get_installed_models_formatted: Found {len(packages)} raw packages.")
+        for i, pkg in enumerate(packages):
+            try:
+                # ONLY check for from_code and to_code
+                if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code'):
+                    from_code = pkg.from_code
+                    to_code = pkg.to_code
+                    # Use codes as names if real names are missing
+                    from_name = getattr(pkg, 'from_name', from_code)
+                    to_name = getattr(pkg, 'to_name', to_code)
 
-def get_available_models_formatted():
-    """Gets available models for download."""
-    try:
-        app_logger.debug("Updating package index...")
-        argostranslate.package.update_package_index()
-        app_logger.debug("Package index updated.")
-        available = argostranslate.package.get_available_packages()
-        app_logger.debug(f"Found {len(available)} available packages.")
-        models = []
-        installed_ids = {f"{m['from_code']}_{m['to_code']}" for m in get_installed_models_formatted()}
-
-        for pkg in available:
-             if hasattr(pkg, 'package_type') and pkg.package_type == "translate" and \
-                hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code'):
-                model_id = f"{pkg.from_code}_{pkg.to_code}"
-                if model_id not in installed_ids:
                     models.append({
-                        "from_code": pkg.from_code,
-                        "to_code": pkg.to_code,
-                        "from_name": pkg.from_name,
-                        "to_name": pkg.to_name,
-                        "package_version": pkg.package_version,
-                        "argos_version": pkg.argos_version,
-                        "id": model_id,
-                        "_package": pkg # Keep ref for download if needed, but don't JSON serialize
+                        "from_code": from_code,
+                        "to_code": to_code,
+                        "from_name": from_name,
+                        "to_name": to_name,
+                        "package_version": getattr(pkg, 'package_version', 'N/A'),
+                        "argos_version": getattr(pkg, 'argos_version', 'N/A'),
+                        "id": f"{from_code}_{to_code}"
                     })
-        app_logger.debug(f"Formatted {len(models)} available models for download.")
+                    logging.debug(f" Simplified processing added installed package {i}: {from_code}_{to_code}")
+                else:
+                    # Log why it was skipped in more detail
+                    reason = []
+                    if not hasattr(pkg, 'from_code'): reason.append("missing from_code")
+                    if not hasattr(pkg, 'to_code'): reason.append("missing to_code")
+                     # Only log warning if it's a potential translate package missing codes
+                    if reason and getattr(pkg, 'package_type', None) == "translate":
+                         logging.warning(f" Skipping installed package {i} ({getattr(pkg, 'metadata', pkg)}) because: {', '.join(reason)}")
+
+            except Exception as inner_e:
+                logging.error(f" Error processing installed package {i}: {inner_e}", exc_info=True)
+                continue
+
+        logging.info(f"get_installed_models_formatted: Returning {len(models)} models after simplified processing.")
         return sorted(models, key=lambda x: (x["from_name"], x["to_name"]))
     except Exception as e:
-        app_logger.error(f"Error getting available models: {e}")
-        # Removed retry logic here as it might hide underlying issues
+        logging.error(f"Error in get_installed_packages() itself: {e}", exc_info=True)
         return []
+# --- END SIMPLIFIED ---
 
+
+# --- REVERTED get_available_models_formatted (uses installed_ids set) ---
+def get_available_models_formatted():
+    """Gets available models and updates the global cache."""
+    global last_available_packages_cache
+
+    models_for_frontend = []
+    # Use the SIMPLIFIED get_installed_models_formatted now
+    installed_models_list = get_installed_models_formatted()
+    installed_ids = {m['id'] for m in installed_models_list}
+    logging.info(f"Found {len(installed_ids)} unique installed model IDs for filtering: {installed_ids}")
+
+    current_available_packages = []
+
+    try:
+        logging.info("Attempting to update package index...")
+        # No need for force=True, environment variable handles location
+        argostranslate.package.update_package_index()
+        logging.info("Package index updated successfully.")
+        logging.info("Attempting to get available packages...")
+        current_available_packages = argostranslate.package.get_available_packages()
+        logging.info(f"Found {len(current_available_packages)} raw available packages.")
+        last_available_packages_cache = current_available_packages
+
+    except Exception as e:
+        logging.error(f"Error updating/getting package index: {e}", exc_info=True); last_available_packages_cache = []; return []
+
+    if not current_available_packages:
+         logging.warning("No available packages found after index update.")
+         last_available_packages_cache = []
+         return []
+
+    logging.info("Filtering available packages against installed IDs...")
+    packages_processed_count = 0; packages_added_count = 0
+
+    for pkg_available in current_available_packages:
+         packages_processed_count += 1; model_id_available = "N/A"
+         try:
+            # Check basic attributes needed
+            # Removed package_type check for available packages
+            if hasattr(pkg_available, 'from_code') and hasattr(pkg_available, 'to_code') and \
+               hasattr(pkg_available, 'from_name') and hasattr(pkg_available, 'to_name'):
+
+                model_id_available = f"{pkg_available.from_code}_{pkg_available.to_code}"
+
+                # Check efficiently against the set of installed IDs
+                if model_id_available not in installed_ids:
+                    logging.debug(f"  '{model_id_available}' is NOT installed. Adding to available list.")
+                    packages_added_count += 1
+                    models_for_frontend.append({
+                        "from_code": pkg_available.from_code,
+                        "to_code": pkg_available.to_code,
+                        "from_name": pkg_available.from_name,
+                        "to_name": pkg_available.to_name,
+                        "package_version": getattr(pkg_available, 'package_version', 'N/A'),
+                        "argos_version": getattr(pkg_available, 'argos_version', 'N/A'),
+                        "id": model_id_available
+                    })
+                else:
+                     logging.debug(f"  '{model_id_available}' is already installed. Skipping.")
+
+            else:
+                 missing_attrs = []
+                 if not hasattr(pkg_available, 'from_code'): missing_attrs.append('from_code')
+                 if not hasattr(pkg_available, 'to_code'): missing_attrs.append('to_code')
+                 # Add others if needed for debugging
+                 if missing_attrs:
+                    logging.debug(f"  Skipping available pkg #{packages_processed_count} due to missing attributes: {', '.join(missing_attrs)}")
+
+         except Exception as pkg_proc_err:
+             logging.warning(f"Error processing available package #{packages_processed_count} ('{model_id_available}'): {pkg_proc_err}", exc_info=True)
+             continue
+
+    logging.info(f"Processed {packages_processed_count} available packages. Added {packages_added_count} to the final list.")
+    return sorted(models_for_frontend, key=lambda x: (x["from_name"], x["to_name"]))
+
+
+# --- Final download_worker (No cache clearing calls, reliance on env var) ---
 def download_worker():
-    """Worker thread to process downloads from the queue."""
+    """Worker thread to process downloads using package object from queue."""
     global download_status
     while True:
-        pkg_info = download_queue.get()
-        if pkg_info is None:
-            app_logger.info("Download worker thread stopping.")
-            break
+        queue_item = download_queue.get()
+        if queue_item is None: break
+        model_id = queue_item.get('id'); package_to_download = queue_item.get('package_obj')
+        if not model_id or not package_to_download:
+            logging.error(f"Worker received invalid queue item: {queue_item}"); download_queue.task_done(); continue
 
-        model_id = pkg_info['id']
-        app_logger.info(f"Starting download process for model: {model_id}")
+        logging.info(f"Starting download process for model: {model_id}")
         download_status[model_id] = {"status": "downloading", "progress": 0, "message": "Starting download..."}
-
+        download_path = None
         try:
-            app_logger.debug(f"Updating package index before download for {model_id}...")
-            argostranslate.package.update_package_index() # Ensure index is fresh
-            available_packages = argostranslate.package.get_available_packages()
-            package_to_download = None
-            for pkg in available_packages:
-                 # Check attributes robustly
-                 if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code') and \
-                    f"{pkg.from_code}_{pkg.to_code}" == model_id:
-                     package_to_download = pkg
-                     break
-
-            if not package_to_download:
-                raise ValueError(f"Package {model_id} not found in available list after index update.")
-
             download_status[model_id] = {"status": "downloading", "progress": 30, "message": "Downloading package..."}
-            app_logger.info(f"Calling download for package {model_id}...")
-            # The download function now accepts a callback for progress
-            # We don't have a simple way to hook that into Flask responses here,
-            # so we rely on coarse status updates.
+            logging.info(f"[{model_id}] Calling package download method...")
+            # The package_to_download object knows its download links and where it *should* go based on settings/env var
             download_path = package_to_download.download()
+            if not download_path or not os.path.exists(download_path): raise Exception("Download failed. Path not returned or file does not exist.")
+            logging.info(f"[{model_id}] Download successful. Path: {download_path}")
+            download_status[model_id] = {"status": "installing", "progress": 70, "message": "Installing package..."}
+            logging.info(f"[{model_id}] Installing package from path: {download_path}")
+            # The install function should use the data directory set by the environment variable
+            argostranslate.package.install_from_path(download_path)
+            logging.info(f"Successfully installed model: {model_id}")
 
-            if download_path:
-                app_logger.info(f"Download complete for {model_id}, path: {download_path}")
-                download_status[model_id] = {"status": "installing", "progress": 70, "message": "Installing package..."}
-                argostranslate.package.install_from_path(download_path)
-                download_status[model_id] = {"status": "completed", "progress": 100, "message": "Model installed successfully!"}
-                app_logger.info(f"Successfully installed model: {model_id}")
-                # Clean up downloaded file? ArgosTranslate might do this already. Check its behavior.
-                # if os.path.exists(download_path):
-                #     os.remove(download_path)
-                #     app_logger.debug(f"Removed downloaded package file: {download_path}")
-            else:
-                raise Exception("Download method returned no path.")
+            # --- Force language reload after successful install ---
+            # This should refresh the *in-memory* list of installed languages/models
+            try:
+                logging.info(f"[{model_id}] Forcing reload of installed languages...")
+                argostranslate.translate.load_installed_languages() # Removed force=True
+                logging.info(f"[{model_id}] Languages reloaded.")
+            except Exception as reload_err:
+                logging.warning(f"[{model_id}] Error reloading languages after install: {reload_err}", exc_info=True)
+            # --- End Force reload ---
 
+            download_status[model_id] = {"status": "completed", "progress": 100, "message": "Model installed successfully!"}
         except Exception as e:
             error_message = f"Error processing model {model_id}: {e}"
-            app_logger.error(error_message, exc_info=True)
-            download_status[model_id] = {"status": "error", "progress": 0, "message": f"Error: {e}"}
+            logging.error(error_message, exc_info=True); user_error_msg = f"Error: {e}"
+            if "Connection refused" in str(e): user_error_msg = "Error: Connection refused (server down?)"
+            if "Network is unreachable" in str(e): user_error_msg = "Error: Network unreachable."
+            if isinstance(e, ValueError) and "metadata not found" in str(e): user_error_msg = "Error: Model details not found (index refresh needed?)"
+            download_status[model_id] = {"status": "error", "progress": 0, "message": user_error_msg}
         finally:
-            download_queue.task_done()
+            if download_path and os.path.exists(download_path):
+                try: os.remove(download_path); logging.info(f"[{model_id}] Removed downloaded package file: {download_path}")
+                except Exception as rm_err: logging.warning(f"[{model_id}] Failed to remove downloaded package file {download_path}: {rm_err}")
+            download_queue.task_done(); package_to_download = None
+
 
 # --- Flask Routes ---
 
 @app.route('/')
 def index():
-    """Renders the main page."""
-    app_logger.info("Serving index.html")
     return render_template('index.html')
 
 @app.route('/api/languages')
 def get_languages():
-    """Returns list of installed languages."""
-    app_logger.info("Request received for /api/languages")
     installed = get_installed_languages_formatted()
-    app_logger.info(f"Returning {len(installed)} installed languages.")
     return jsonify({"installed": installed})
 
 @app.route('/api/models/installed')
 def get_installed_models_route():
-    """Returns list of installed translation models."""
-    app_logger.info("Request received for /api/models/installed")
-    models = get_installed_models_formatted()
-    app_logger.info(f"Returning {len(models)} installed models.")
-    return jsonify(models)
+    return jsonify(get_installed_models_formatted())
 
 @app.route('/api/models/available')
 def get_available_models_route():
-    """Returns list of available translation models for download."""
-    app_logger.info("Request received for /api/models/available")
-    models = get_available_models_formatted()
-    app_logger.info(f"Returning {len(models)} available models.")
-    # Remove internal _package reference before sending JSON
-    models_safe = [{k: v for k, v in m.items() if k != '_package'} for m in models]
-    return jsonify(models_safe)
+    logging.info("Route /api/models/available requested.")
+    available_models = get_available_models_formatted()
+    logging.info(f"Route /api/models/available returning {len(available_models)} models.")
+    return jsonify(available_models)
 
 @app.route('/api/translate', methods=['POST'])
 def translate_text():
-    """Handles translation requests."""
-    data = request.get_json()
-    app_logger.info(f"/api/translate received data: {data}") # Log received data first
     try:
-        text = data.get('text', '')
-        source_lang_code = data.get('source_lang', '')
-        target_lang_code = data.get('target_lang', '')
-
-        if not text or not source_lang_code or not target_lang_code:
-            app_logger.warning(f"Missing required fields in /api/translate request: {data}")
-            return jsonify({"error": "Missing required fields: text, source_lang, target_lang"}), 400
-
-        # Handle auto-detection if source_lang is 'auto' (though Argos doesn't directly support it)
-        # The main app should detect and pass the actual language code
-        if source_lang_code == 'auto':
-            # If 'auto' is passed, we rely on the main app having detected it.
-            # If not, ArgosTranslate cannot handle 'auto'. We might need a default.
-            # For now, assume the main app sends a specific language code.
-            # If 'auto' *must* be handled here, language detection would be needed.
-            # Example (requires langdetect):
-            # try:
-            #     from langdetect import detect
-            #     detected_lang = detect(text[:500]) # Detect based on sample
-            #     source_lang_code = detected_lang
-            #     app_logger.info(f"Auto-detected source language as: {source_lang_code}")
-            # except Exception as detect_err:
-            #     app_logger.warning(f"Language auto-detection failed: {detect_err}. Cannot proceed.")
-            #     return jsonify({"error": "Language auto-detection failed."}), 400
-             app_logger.warning("Received 'auto' source language. ArgosTranslate requires a specific code. Relying on main app detection.")
-             # If the main app *always* sends a specific code, this branch might not be needed.
-             # If it can send 'auto', this needs logic to handle it (like detection above or erroring out).
-             # For now, let's assume the main app handles 'auto' and sends a specific code.
-             # If it still gets here as 'auto', it will likely fail below.
-
-
+        data = request.get_json(); text = data.get('text', ''); source_lang = data.get('source_lang', ''); target_lang = data.get('target_lang', '')
+        if not text or not source_lang or not target_lang: logging.error(f"Translate request missing fields: text={bool(text)}, src={source_lang}, tgt={target_lang}"); return jsonify({"error": "Missing required fields: text, source_lang, target_lang"}), 400
+        logging.info(f"Received translation request: {source_lang} -> {target_lang}, text length: {len(text)}")
         installed_languages = argostranslate.translate.get_installed_languages()
-        source_lang = next((lang for lang in installed_languages if lang.code == source_lang_code), None)
-        target_lang = next((lang for lang in installed_languages if lang.code == target_lang_code), None)
-
-        if not source_lang:
-            msg = f"Source language '{source_lang_code}' not installed."
-            app_logger.warning(msg)
-            return jsonify({"error": msg}), 404
-        if not target_lang:
-            msg = f"Target language '{target_lang_code}' not installed."
-            app_logger.warning(msg)
-            return jsonify({"error": msg}), 404
-
-        app_logger.info(f"Attempting translation from '{source_lang.name}' ({source_lang_code}) to '{target_lang.name}' ({target_lang_code})")
-        translation = source_lang.get_translation(target_lang)
-
-        if translation is None:
-            msg = f"No translation model installed for {source_lang_code} -> {target_lang_code}"
-            app_logger.warning(msg)
-            return jsonify({"error": msg}), 404
-
+        source = next((lang for lang in installed_languages if lang.code == source_lang), None); target = next((lang for lang in installed_languages if lang.code == target_lang), None)
+        if not source: logging.error(f"Source language '{source_lang}' not installed."); return jsonify({"error": f"Source language ({source_lang}) not installed."}), 404
+        if not target: logging.error(f"Target language '{target_lang}' not installed."); return jsonify({"error": f"Target language ({target_lang}) not installed."}), 404
+        translation = source.get_translation(target)
+        if translation is None: logging.error(f"No translation model installed for {source_lang} -> {target_lang}"); return jsonify({"error": f"No translation model installed for {source_lang} -> {target_lang}"}), 404
         translated_text = translation.translate(text)
-        app_logger.info(f"Translation successful: '{text[:30]}...' -> '{translated_text[:30]}...'")
+        logging.info(f"Translation successful ({source_lang} -> {target_lang}), output length: {len(translated_text)}")
         return jsonify({"translated_text": translated_text})
-
-    except Exception as e:
-        app_logger.error(f"Exception in /api/translate: {e}", exc_info=True)
-        return jsonify({"error": f"An internal server error occurred during translation: {e}"}), 500
-
+    except Exception as e: logging.error(f"Translation error: {e}", exc_info=True); return jsonify({"error": f"An internal error occurred during translation: {e}"}), 500
 
 @app.route('/api/models/download', methods=['POST'])
 def download_model():
-    """Initiates model download."""
-    global download_thread
-    data = request.get_json()
-    model_id = data.get('id')
-    app_logger.info(f"Request received for /api/models/download: {data}")
-
-    if not model_id:
-        app_logger.warning("Missing model ID in download request.")
-        return jsonify({"error": "Missing model 'id' (e.g., 'en_es')"}), 400
-
-    if model_id in download_status and download_status[model_id]['status'] in ['downloading', 'installing', 'queued']:
-         app_logger.warning(f"Download/install already in progress or queued for model: {model_id}")
-         return jsonify({"message": f"Model {model_id} download/install already in progress or queued."}), 409 # 409 Conflict
-
-    # Start worker thread if not running
-    if download_thread is None or not download_thread.is_alive():
-        app_logger.info("Starting download worker thread.")
-        download_thread = threading.Thread(target=download_worker, daemon=True)
-        download_thread.start()
-
-    # Add package info to queue
-    download_queue.put({"id": model_id})
-    download_status[model_id] = {"status": "queued", "progress": 0, "message": "Download queued..."}
-
-    app_logger.info(f"Queued download for model: {model_id}")
-    return jsonify({"message": f"Download initiated for model {model_id}. Check /api/download/status/{model_id} for progress.", "id": model_id}), 202 # 202 Accepted
+    global download_thread, download_status, download_queue, last_available_packages_cache
+    data = request.get_json(); model_id = data.get('id')
+    if not model_id: logging.error("Download request missing model 'id'"); return jsonify({"error": "Missing model 'id' (e.g., 'en_es')"}), 400
+    if not isinstance(model_id, str) or '_' not in model_id: logging.error(f"Download request received invalid model id format: {model_id}"); return jsonify({"error": "Invalid model 'id' format."}), 400
+    current_status = download_status.get(model_id, {}).get('status')
+    if current_status in ['queued', 'downloading', 'installing']: logging.warning(f"Model {model_id} download/install already in progress (Status: {current_status})."); return jsonify({"message": f"Model {model_id} {current_status}."}), 409
+    package_to_queue = None
+    logging.debug(f"Searching for model '{model_id}' in cached list of {len(last_available_packages_cache)} available packages.")
+    for pkg in last_available_packages_cache:
+        if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code') and f"{pkg.from_code}_{pkg.to_code}" == model_id: package_to_queue = pkg; logging.info(f"Found package object for '{model_id}' in cache."); break
+    if not package_to_queue:
+        logging.error(f"Could not find package object for '{model_id}' in the cached available list. Refreshing cache once...")
+        get_available_models_formatted()
+        logging.debug(f"Refreshed cache. Searching again for model '{model_id}' in cached list of {len(last_available_packages_cache)} packages.")
+        for pkg in last_available_packages_cache:
+            if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code') and f"{pkg.from_code}_{pkg.to_code}" == model_id: package_to_queue = pkg; logging.info(f"Found package object for '{model_id}' after refreshing cache."); break
+        if not package_to_queue: logging.error(f"Still could not find package object for '{model_id}' after refresh."); return jsonify({"error": f"Model '{model_id}' metadata not found. Please refresh the model list and try again."}), 404
+    if download_thread is None or not download_thread.is_alive(): logging.info("Starting download worker thread."); download_thread = threading.Thread(target=download_worker, daemon=True); download_thread.start()
+    queue_item = {"id": model_id, "package_obj": package_to_queue}
+    download_queue.put(queue_item); download_status[model_id] = {"status": "queued", "progress": 0, "message": "Download queued..."}
+    logging.info(f"Queued download for model: {model_id}")
+    return jsonify({"message": f"Download initiated for model {model_id}. Check status endpoint.", "id": model_id}), 202
 
 @app.route('/api/download/status/<model_id>')
 def get_download_status(model_id):
-    """Gets the status of a specific download."""
-    app_logger.debug(f"Request received for /api/download/status/{model_id}")
     status_info = download_status.get(model_id)
-    if status_info:
-        app_logger.debug(f"Returning status for {model_id}: {status_info}")
-        return jsonify(status_info)
-    else:
-        app_logger.warning(f"Status not found for model ID: {model_id}")
-        return jsonify({"status": "not_found", "message": "Download status not found for this ID."}), 404
+    if status_info: return jsonify(status_info)
+    else: logging.debug(f"Status request for unknown/completed model ID: {model_id}"); return jsonify({"status": "not_found", "message": "Status not found for this ID."}), 404
 
 @app.route('/api/models/delete', methods=['POST'])
 def delete_model():
-    """Deletes an installed model."""
-    data = request.get_json()
-    model_id = data.get('id')
-    app_logger.info(f"Request received for /api/models/delete: {data}")
-
-    if not model_id:
-        app_logger.warning("Missing model ID in delete request.")
-        return jsonify({"error": "Missing model 'id' (e.g., 'en_es')"}), 400
-
-    parts = model_id.split('_')
-    if len(parts) != 2:
-         app_logger.warning(f"Invalid model ID format for deletion: {model_id}")
-         return jsonify({"error": "Invalid model 'id' format. Should be 'fromCode_toCode'"}), 400
-    from_code, to_code = parts
-
     try:
+        data = request.get_json(); model_id = data.get('id')
+        if not model_id: logging.error("Delete model request missing 'id'"); return jsonify({"error": "Missing model 'id' (e.g., 'en_es')"}), 400
+        parts = model_id.split('_');
+        if len(parts) != 2: logging.error(f"Delete model request invalid id format: {model_id}"); return jsonify({"error": "Invalid model 'id' format. Should be 'fromCode_toCode'"}), 400
+        from_code, to_code = parts
         installed_packages = argostranslate.package.get_installed_packages()
         package_to_delete = None
         for pkg in installed_packages:
-            if hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code') and \
-               pkg.from_code == from_code and pkg.to_code == to_code:
-                package_to_delete = pkg
-                break
-
+            if hasattr(pkg, 'package_type') and pkg.package_type == "translate" and \
+               hasattr(pkg, 'from_code') and hasattr(pkg, 'to_code') and \
+               pkg.from_code == from_code and pkg.to_code == to_code: package_to_delete = pkg; break
         if package_to_delete:
-            app_logger.info(f"Attempting to uninstall model: {model_id}")
-            argostranslate.package.uninstall(package_to_delete)
-            # Remove status if it exists
-            if model_id in download_status:
-                del download_status[model_id]
-            app_logger.info(f"Successfully uninstalled model: {model_id}")
-            return jsonify({"message": f"Model {model_id} deleted successfully."}), 200
-        else:
-            app_logger.warning(f"Model {model_id} not found for deletion.")
-            return jsonify({"error": f"Model {model_id} not found or is not installed."}), 404
-
-    except Exception as e:
-        app_logger.error(f"Error deleting model {model_id}: {e}", exc_info=True)
-        return jsonify({"error": f"An internal error occurred while deleting: {e}"}), 500
+            logging.info(f"Attempting to uninstall model: {model_id}"); argostranslate.package.uninstall(package_to_delete)
+            # Force language reload after uninstall
+            try: argostranslate.translate.load_installed_languages(); logging.info(f"[{model_id}] Languages reloaded after delete.")
+            except Exception as reload_err: logging.warning(f"[{model_id}] Error reloading languages after delete: {reload_err}", exc_info=True)
+            if model_id in download_status: del download_status[model_id]
+            logging.info(f"Successfully uninstalled model: {model_id}"); return jsonify({"message": f"Model {model_id} deleted successfully."}), 200
+        else: logging.warning(f"Model {model_id} not found for deletion."); return jsonify({"error": f"Model {model_id} not found or is not installed."}), 404
+    except Exception as e: logging.error(f"Error deleting model {model_id}: {e}", exc_info=True); return jsonify({"error": f"An internal error occurred while deleting: {e}"}), 500
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
-    """Shuts down the Flask server."""
-    app_logger.info("Shutdown endpoint called.")
-    shutdown_func = request.environ.get('werkzeug.server.shutdown')
-    if shutdown_func is None:
-        app_logger.error('Shutdown failed: Not running with the Werkzeug Server')
-        return jsonify({"error": "Server shutdown function not available."}), 500
-
-    app_logger.info("Initiating server shutdown...")
-    # Run shutdown in a separate thread to allow the response to be sent
-    shutdown_thread = threading.Thread(target=shutdown_func, name="FlaskShutdownThread")
-    shutdown_thread.start()
-    return jsonify({"message": "Shutting down..."}), 200
-
+    logging.info("Shutdown endpoint requested.")
+    global download_queue
+    if download_queue: download_queue.put(None)
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None: logging.error('Not running with the Werkzeug Server. Cannot shutdown programmatically.'); return jsonify({"error": "Server cannot be shut down programmatically."}), 500
+    shutdown_thread = threading.Thread(target=func, name="FlaskShutdownThread"); shutdown_thread.start()
+    logging.info("Flask server shutdown initiated."); return jsonify({"message": "Shutting down server..."})
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # Ensure download worker thread is started if not already
     if download_thread is None or not download_thread.is_alive():
-        app_logger.info("Starting download worker thread on app start.")
-        download_thread = threading.Thread(target=download_worker, daemon=True, name="DownloadWorker")
+        logging.info("Starting download worker thread on app start.")
+        download_thread = threading.Thread(target=download_worker, daemon=True)
         download_thread.start()
 
-    # Run Flask app (use_reloader=False is important when run by another script)
-    app_logger.info("Starting Flask server...")
     app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
-    app_logger.info("Flask server stopped.")
