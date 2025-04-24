@@ -1,0 +1,43 @@
+{
+    "ControlWindow": {
+        "x": 1956,
+        "y": 231,
+        "width": 367,
+        "height": 775
+    },
+    "CaptureWidget": {
+        "x": 591,
+        "y": 282,
+        "width": 719,
+        "height": 114,
+        "opacity": 0.28627450980392155
+    },
+    "viewer_settings": {
+        "font_color": [
+            255,
+            255,
+            255,
+            255
+        ],
+        "bg_color_outer": [
+            0,
+            0,
+            0,
+            200
+        ],
+        "font_path": "C:\\Windows\\Fonts\\YuGothB.ttc",
+        "font_size": 17
+    },
+    "font_settings": {
+        "size": 20,
+        "type": "ja"
+    },
+    "settings": {
+        "translate_with_ai": false
+    },
+    "active_theme_name": "Forest Canopy",
+    "ai_api_config": {
+        "provider": "LM Studio",
+        "endpoint": "http://localhost:1234/v1/chat/completions"
+    }
+}
