@@ -1,110 +1,170 @@
-Okay, here is the updated README.md in English, incorporating the information about Tesseract installation and the importance of language packs:
+---
 
---- START OF FILE README.md ---
+# Overlay Translate
 
-Overlay Translate
+Overlay Translate is a powerful tool for capturing and translating on-screen text using Tesseract OCR. It supports offline translation through a local server, AI-assisted translation (OpenAI, Ollama, LM Studio), and even offers interactive AI chat capabilities.
 
-Overlay Translate is a versatile tool for capturing and translating on-screen text using Tesseract OCR. It offers offline translation (via a local server), AI-assisted translation (OpenAI, Ollama, LM Studio), and interactive chat capabilities.
+---
 
-✨ Key Features
+## ✨ Key Features
 
-Flexible OCR: Utilizes the Tesseract OCR engine for text recognition.
+- **Flexible OCR**  
+  Utilizes the Tesseract OCR engine for highly accurate text recognition.
 
-Multiple Capture Methods:
+- **Multiple Capture Methods**
+  - **Overlay Capture (F1):** Capture adjustable screen regions.
+  - **Snip Tool (F4):** Quickly select any part of the screen.
+  - **Live Translation (F3):** Continuously translate dynamic content.
 
-Adjustable screen region capture overlay (F1).
+- **Integrated Viewer**
+  - View captured images with overlaid translations.
+  - Customize font, size, and colors.
+  - Save captures easily.
 
-"Snip" tool for quick selections (F4).
+- **Offline Translation**
+  - Translate locally using a backend server (e.g., Flask + Argos Translate).
+  - Requires setup (see below).
 
-Live Translation: Continuous translation mode (F3) for dynamic content.
+- **AI Translation**
+  - Seamless integration with AI services:
+    - **OpenAI** (requires API key)
+    - **Ollama** (requires local endpoint)
+    - **LM Studio** (local endpoint, API key optional)
 
-Integrated Viewer: Displays the captured image with translated text overlaid. Allows adjustment of font, size, and colors for viewing and saving.
+- **AI Chat (Ctrl+T)**
+  - Chat interface to interact with your configured AI model.
+  - Useful for contextual translations, questions, and more.
 
-Offline Translation: Capable of local translation using a backend server (e.g., Flask with Argos Translate in app.py - requires setup).
+- **Customizable Interface**
+  - Adjust overlay opacity.
+  - "Click-Through" mode (F2) to interact with windows behind the overlay.
+  - Multiple visual themes and a theme editor.
 
-AI Translation: Configurable support for AI services:
+- **System Integration**
+  - Minimize to system tray.
+  - Global keyboard shortcuts for key functions.
 
-OpenAI (Requires API Key)
+- **Utilities**
+  - Resource monitor (CPU/RAM usage) in the status bar.
+  - Detailed logging for troubleshooting.
+  - Support folder containing captures, metadata, and logs.
+  - Option to clean support files on exit.
 
-Ollama (Requires local endpoint)
+---
 
-LM Studio (Requires local endpoint, API Key optional)
+## ⚙️ Requirements
 
-AI Chat: Chat interface (Ctrl+T) to interact with the configured AI model (contextual translations, questions, etc.).
+- **Python:** Version 3.8 or higher recommended.
 
-Customizable Interface:
+- **Tesseract OCR Engine:**  
+  *Essential! Overlay Translate depends on Tesseract being installed.*
 
-Overlay opacity adjustment.
+  - **Windows:**  
+    Install using an official installer (e.g., UB Mannheim builds recommended).  
+    ➔ Ensure the Tesseract installation directory is added to your system's PATH variable.  
+    ➔ The app also tries to auto-detect common installation locations.
 
-"Click-Through" mode (F2) to interact with windows behind the overlay.
+  - **macOS:**  
+    ```bash
+    brew install tesseract tesseract-lang
+    ```
 
-Multiple predefined visual Themes and an editor to create custom themes.
+  - **Linux (Debian/Ubuntu):**  
+    ```bash
+    sudo apt update
+    sudo apt install tesseract-ocr tesseract-ocr-all
+    ```
+    (Or install specific language packs, e.g., `tesseract-ocr-eng`, `tesseract-ocr-jpn`, etc.)
 
-System Integration:
+  - **Other Linux distros:**  
+    Use your package manager (e.g., yum, dnf).
 
-Minimize to System Tray.
+  - **Language Packs:**  
+    ➔ You must install `.traineddata` files for all languages you intend to OCR.  
+    ➔ Verify installed languages via the app (Help ➔ Tesseract Info).
 
-Global keyboard shortcuts for key functions.
+- **Python Dependencies:**  
+  Install all required libraries:
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-Utilities:
+---
 
-Resource Monitor (App CPU/RAM) in the status bar.
+## 🚀 Basic Usage
 
-Detailed Logging.
+1. **Start the App:**  
+   Run:
+   ```bash
+   python main.py
+   ```
+   from the project directory.
 
-Support Folder (Support on Desktop by default) containing captures, metadata (.txt), and logs. Cleanup option on exit.
+2. **Adjust the Overlay:**  
+   Move and resize the translucent window to cover the text you want to capture.
 
-⚙️ Requirements
+3. **Capture Options:**  
+   - **Overlay Capture (F1):** Captures text inside the overlay.
+   - **Snip Tool (F4):** Drag and capture any area.
+   - **Live Translation (F3):** Continuously translate the selected area.
 
-Python: Version 3.8 or higher recommended.
+4. **Other Shortcuts:**
+   - **Click-Through Mode (F2):** Enable or disable click-through behavior.
+   - **AI Chat (Ctrl+T):** Open the AI chat window.
 
-Tesseract OCR Engine:
+5. **Settings:**  
+   Configure OCR source languages, translation targets, AI providers, fonts, themes, and more via the menu.
 
-Essential! You must install Tesseract OCR separately on your operating system. This application is a wrapper around the Tesseract engine.
+---
 
-Windows: Using an official installer (like those from UB Mannheim, linked on the Tesseract Wiki) is recommended. Ensure the installation directory is added to your system's PATH environment variable, or the app will attempt to find common install locations.
+## 🔧 Additional Configuration
 
-macOS: Use Homebrew: brew install tesseract tesseract-lang
+- **Offline Local Server:**  
+  To enable offline translation, run a local server like the example in `app.py` (Flask + Argos Translate) accessible at:
+  ```
+  http://127.0.0.1:5000
+  ```
 
-Linux (Debian/Ubuntu): sudo apt update && sudo apt install tesseract-ocr tesseract-ocr-all (or install specific language packs like tesseract-ocr-eng, tesseract-ocr-spa, etc.)
+- **AI Providers:**  
+  Go to **Settings ➔ AI Configuration** to set up:
+  - OpenAI (API key required)
+  - Ollama (local endpoint)
+  - LM Studio (local endpoint)
 
-Other Linux: Use your distribution's package manager (e.g., yum, dnf).
+  Secure storage for API keys is handled via `keyring`.
 
-Language Packs: Crucially, you MUST install the language packs (.traineddata files) for the languages you intend to perform OCR on. This is usually an option during installation (Windows) or requires installing separate packages (Linux/macOS, e.g., tesseract-ocr-eng, tesseract-ocr-jpn, tesseract-ocr-chi-sim, tesseract-ocr-kor). Install packs for all source languages you might use.
+- **Tesseract Info:**  
+  If Tesseract is not detected, verify your installation and PATH environment variable.  
+  Check detected Tesseract info inside the app under **Help ➔ Tesseract Info**.
 
-Verification: Check Help -> Tesseract Info... within the application to see the detected Tesseract path and installed languages.
+---
 
-Python Dependencies: Install the required libraries using pip:
+## 📂 Folder Structure
 
-pip install -r requirements.txt
+- **Support Folder:**  
+  Located on your Desktop by default. It contains:
+  - Screenshots
+  - Metadata files (`.txt`)
+  - Application logs
 
+- **Cleanup:**  
+  You can enable automatic cleanup on exit in the settings.
 
-(Make sure you have the requirements.txt file in the project directory).
+---
 
-🚀 Basic Usage
+## 🛠️ Troubleshooting
 
-Start: Run python main.py from your terminal in the project directory.
+- **OCR issues?**  
+  Ensure correct installation of Tesseract and all necessary language packs.
 
-Adjust: Move and resize the translucent overlay window to cover the screen area you want to capture.
+- **Server not found?**  
+  Verify your local translation server is running and available at the configured address.
 
-Capture (F1): Press F1 to capture the text within the overlay, perform OCR, and translate. The result will be shown in the viewer.
+- **Keyboard shortcuts not working?**  
+  Make sure the app window is focused or check system settings for global hotkey conflicts.
 
-Snip (F4): Press F4 to activate the Snipping Tool. Drag to select an area; upon release, it will be captured and translated.
+---
 
-Live (F3): Press F3 to toggle Live Translation mode. It will continuously translate content under the overlay. The result appears in the control window or a pop-out window if activated.
+Overlay Translate is under active development — feedback and contributions are welcome!
 
-Click-Through (F2): Press F2 to allow mouse clicks to pass through the overlay or to make it interactive again.
-
-AI Chat (Ctrl+T): Open the chat window to interact with the configured AI model.
-
-Configure: Use the menus (Settings, Help) to change languages (OCR source and translation target), configure the AI provider, adjust fonts, switch themes, and more.
-
-🔧 Additional Configuration
-
-Local Server (Offline): For offline translation, you need a compatible translation server (like the example in app.py using Flask and Argos Translate) configured and running at http://127.0.0.1:5000.
-
-Artificial Intelligence: Go to Settings -> AI Configuration to select your provider (OpenAI, Ollama, LM Studio) and enter the necessary API Keys or Endpoints. Secure keys are stored using keyring.
-
-Tesseract: If the application cannot find Tesseract, verify your installation and system PATH environment variable. Detected information is shown in Help -> Tesseract Info....
-
---- END OF FILE README.md ---
+---
