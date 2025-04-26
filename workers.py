@@ -512,7 +512,7 @@ class AITranslationWorker(QThread):
                 response = requests.post(endpoint, headers=headers, json=data, timeout=60)
             elif provider == "Ollama":
                 # Use a reasonable default model or make it configurable
-                model_name = "llama3" # Example default
+                model_name = "llama3.2:1b" # Example default
                 if endpoint.endswith('/api/chat'):
                      data = { "model": model_name, "messages": [{"role": "user", "content": prompt}],
                               "stream": False, "options": { "temperature": 0.3, "num_predict": max_tokens } }
@@ -722,7 +722,7 @@ class AIStreamingWorker(QThread):
                 logger.debug(f"Sending stream request to OpenAI: {endpoint}")
                 response = requests.post(endpoint, headers=headers, json=data, stream=True, timeout=60)
             elif provider == "Ollama":
-                model_name = "llama3" # Default for Ollama
+                model_name = "llama3.2:1b" # Default for Ollama
                 if endpoint.endswith('/api/chat'):
                     headers["Accept"] = "application/x-ndjson"
                     data = { "model": model_name, "messages": [{"role": "user", "content": prompt}],
