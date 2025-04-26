@@ -99,7 +99,14 @@ except OSError as e:
     sys.exit(f"Error: {e}. Please ensure the directory exists and the application has write permissions.")
 
 # --- Imports dependent on environment variable ---
-from langdetect import detect as langdetect_detect, LangDetectException
+from langdetect import detect as langdetect_detect
+
+try:
+    # Para versiones donde existe lang_detect_exception
+    from langdetect.lang_detect_exception import LangDetectException
+except ImportError:
+    # Si no existe, usamos Exception normal
+    LangDetectException = Exception
 import argostranslate.package
 import argostranslate.translate
 import argostranslate.settings
