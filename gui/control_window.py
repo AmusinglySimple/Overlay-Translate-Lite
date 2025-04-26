@@ -24,7 +24,7 @@ from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QColor, QFont, QActionGr
 # Internal imports (relative)
 from .capture_widget import CaptureWidget
 from .snipping_tool import SnippingTool
-from .dialogs import IntroDialog, ChatWindow, LiveTranslationWindow, ThemeDialog
+from .dialogs import IntroDialog, ChatWindow, LiveTranslationWindow, ThemeDialog, TranslatedImageViewer
 from .resource_monitor import ResourceMonitorWidget
 
 # Worker imports
@@ -454,23 +454,41 @@ class ControlWindow(QMainWindow):
         self.live_capture_btn.style().unpolish(self.live_capture_btn)
         self.live_capture_btn.style().polish(self.live_capture_btn)
 
+    # --- MODIFIED: toggleTranslateWithAI ---
     def toggleTranslateWithAI(self, checked):
-        # (Method remains unchanged)
-        logger.debug(f"AI Toggle changed: {checked}")
+        logger.debug(f"AI Toggle Toggled Signal: {checked}")
+
+        # Check if the toggle is being turned ON
         if checked:
+            # Perform checks BEFORE changing internal state
             if self.is_live_capturing:
-                QMessageBox.warning(self, "Live Capture Active", "AI translation is disabled during live capture.")
+                logger.warning("Cannot enable AI during live capture.")
+                # --- Block signals, revert, unblock ---
+                self.translate_with_ai_toggle.blockSignals(True)
                 self.translate_with_ai_toggle.setChecked(False)
-                return
+                self.translate_with_ai_toggle.blockSignals(False)
+                # --- End Block ---
+                QMessageBox.warning(self, "Live Capture Active", "AI translation must be stopped before enabling Live Capture.")
+                # Button state is now visually correct, internal state hasn't changed
+                return # Exit
+
             if not ai_api_config.get("provider"):
-                QMessageBox.warning(self, "AI Not Configured", "Please configure an AI API provider first in Settings > AI Configuration.")
+                logger.warning("Cannot enable AI: No provider configured.")
+                # --- Block signals, revert, unblock ---
+                self.translate_with_ai_toggle.blockSignals(True)
                 self.translate_with_ai_toggle.setChecked(False)
-                return
+                self.translate_with_ai_toggle.blockSignals(False)
+                # --- End Block ---
+                QMessageBox.warning(self, "AI Not Configured", "Please configure an AI API provider first in Settings > AI Configuration.")
+                # Button state is now visually correct, internal state hasn't changed
+                return # Exit
 
+        # If checks passed (or if toggling OFF), update internal state
+        # This part only runs if the state should *actually* change
         self.translate_with_ai_enabled = checked
-        self._update_ai_toggle_style()
-        logger.info(f"Translate with AI {'enabled' if checked else 'disabled'}")
-
+        self._update_ai_toggle_style() # Update visual style based on the *new* state
+        logger.info(f"Translate with AI {'enabled' if self.translate_with_ai_enabled else 'disabled'}")
+        # Saving handled on exit
 
     def toggleLiveCapture(self):
         # (Method remains unchanged)
@@ -858,15 +876,51 @@ class ControlWindow(QMainWindow):
 
 
     def gather_current_state(self):
-        # (Method remains unchanged)
+        """Gathers state from all components into a dictionary."""
         state = {}
+        # Control window geometry
         state['ControlWindow'] = { 'x': self.x(), 'y': self.y(), 'width': self.width(), 'height': self.height() }
-        if self.capture_widget: state['CaptureWidget'] = self.capture_widget.get_state()
-        if self.live_translation_popout: state['LiveTranslationWindow'] = self.live_translation_popout.save_geometry()
-        if self.chat_window: state['ChatWindow'] = self.chat_window.save_geometry()
+        # Capture widget state
+        if self.capture_widget:
+             state['CaptureWidget'] = self.capture_widget.get_state()
+        # Live translation popout geometry
+        if self.live_translation_popout:
+             state['LiveTranslationWindow'] = self.live_translation_popout.save_geometry()
+        # Chat window geometry
+        if self.chat_window:
+             state['ChatWindow'] = self.chat_window.save_geometry()
+
+        # --- ADDED: Include TranslatedImageViewer geometry ---
+        # Note: We can only save geometry if an instance currently exists.
+        # If the user uses the viewer multiple times, only the geometry of the
+        # *last opened* viewer instance before closing the main app will be saved.
+        # This might be acceptable, or requires more complex state management.
+        # Let's assume saving the last known geometry is sufficient for now.
+        # We find the viewer instance via QApplication.findChildren (less ideal)
+        # or preferably rely on a reference if we kept one (we don't currently).
+        # A simpler approach: The viewer saves its *own* geometry on close,
+        # but requires modifying save_settings to merge.
+        # Let's stick to the centralized approach for now:
+        active_viewer = None
+        for widget in QApplication.topLevelWidgets():
+             if isinstance(widget, TranslatedImageViewer) and widget.isVisible():
+                  active_viewer = widget
+                  break
+        if active_viewer:
+             state['TranslatedImageViewer'] = active_viewer.get_geometry_settings()
+             logger.debug(f"Gathered active TranslatedImageViewer geometry: {state['TranslatedImageViewer']}")
+        # --- End ADDED ---
+                # --- Viewer STYLE settings (already captured in last_viewer_settings) ---
         state['viewer_settings'] = self.last_viewer_settings
+        # --- End Viewer Style ---
+
+        # Font settings
         state['font_settings'] = { 'size': self.default_font_size, 'type': self.default_font_type }
+        # App settings
         state['settings'] = { 'translate_with_ai': self.translate_with_ai_enabled }
+        # AI API config is handled directly by save_settings using global state
+        # Theme is handled directly by save_settings using global state
+
         return state
 
 
