@@ -1,4 +1,3 @@
-# utils/helpers.py
 import os
 import platform
 import json
@@ -7,7 +6,7 @@ from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import QApplication
 from .config import (
     CONFIG_FILE, DEFAULT_THEME, logger, get_current_theme, update_current_theme,
-    ai_api_config, PREDEFINED_THEMES # Import PREDEFINED_THEMES
+    ai_api_config, PREDEFINED_THEMES # Import PREDEFINED_THEMES and ai_api_config
 )
 import keyring # Keep keyring import here
 
@@ -175,64 +174,128 @@ def choose_font_for_text(text, default_font_family="Roboto", font_size=24):
 
 
 def load_settings():
-    # (load_settings remains the same as previous correction)
-    global ai_api_config
+    global ai_api_config # Ensure we modify the global config
     settings = {}
-    active_theme = DEFAULT_THEME
+    active_theme = None # Initialize as None
+
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f: settings = json.load(f)
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
             logger.info(f"Successfully loaded settings from {CONFIG_FILE}")
-            saved_theme_name = settings.get('active_theme_name')
-            if saved_theme_name and saved_theme_name in PREDEFINED_THEMES:
-                active_theme = PREDEFINED_THEMES[saved_theme_name]
-                logger.info(f"Loaded active theme: '{saved_theme_name}'")
-            elif saved_theme_name:
-                logger.warning(f"Saved theme name '{saved_theme_name}' not found. Using default.")
-            else: logger.info("No active theme name found. Using default theme.")
-            update_current_theme(active_theme)
+
+            # --- MODIFIED: Theme Loading ---
+            # Priority 1: Load full theme data if available
+            saved_theme_data = settings.get('active_theme_data')
+            if isinstance(saved_theme_data, dict) and "name" in saved_theme_data and "colors" in saved_theme_data:
+                # Basic validation of colors dictionary might be good here too
+                active_theme = saved_theme_data
+                logger.info(f"Loaded active theme from full data: '{active_theme.get('name', 'Unnamed')}'")
+            else:
+                # Priority 2: Fallback to loading by name
+                saved_theme_name = settings.get('active_theme_name')
+                if saved_theme_name and saved_theme_name in PREDEFINED_THEMES:
+                    active_theme = PREDEFINED_THEMES[saved_theme_name]
+                    logger.info(f"Loaded active theme by name: '{saved_theme_name}'")
+                elif saved_theme_name:
+                    logger.warning(f"Saved theme name '{saved_theme_name}' not found in predefined themes. Using default.")
+                # If neither full data nor valid name found, active_theme remains None
+            # --- END MODIFIED ---
+
+            # --- MODIFIED: AI Config Loading ---
             loaded_ai_config_data = settings.get('ai_api_config')
-            current_ai_config = {"provider": None, "endpoint": None, "key_stored": False}
+            current_ai_config = {"provider": None, "endpoint": None, "key_stored": False} # Reset temporary dict
             if loaded_ai_config_data and isinstance(loaded_ai_config_data, dict):
                  current_ai_config["provider"] = loaded_ai_config_data.get("provider", None)
                  current_ai_config["endpoint"] = loaded_ai_config_data.get("endpoint", None)
+                 # Check keyring dynamically
                  if current_ai_config["provider"] in ["OpenAI", "LM Studio"]:
                       try:
-                          if keyring.get_password("OverlayTranslate", current_ai_config["provider"]): current_ai_config["key_stored"] = True
-                      except Exception as key_err: logger.warning(f"Could not check keyring for {current_ai_config['provider']} key: {key_err}")
+                          if keyring.get_password("OverlayTranslate", current_ai_config["provider"]):
+                              current_ai_config["key_stored"] = True
+                      except Exception as key_err:
+                           logger.warning(f"Could not check keyring for {current_ai_config['provider']} key: {key_err}")
                  logger.info(f"Loaded AI Config: Provider={current_ai_config['provider']}, Endpoint={current_ai_config['endpoint']}, KeyStored={current_ai_config['key_stored']}")
-            else: logger.info("No AI API config found. Using defaults.")
+            else:
+                logger.info("No AI API config found in settings file.")
+            # Update the GLOBAL ai_api_config dictionary
             ai_api_config.update(current_ai_config)
+            # --- END MODIFIED ---
+
         except Exception as e:
             logger.error(f"Failed to load/process config from {CONFIG_FILE}: {e}. Using defaults.", exc_info=True)
-            settings = {}; update_current_theme(DEFAULT_THEME)
+            settings = {}
+            active_theme = None # Reset on error
+            # Reset global AI config as well
             ai_api_config.update({"provider": None, "endpoint": None, "key_stored": False})
+
+    # --- Set active theme (either loaded or default) ---
+    if active_theme:
+        update_current_theme(active_theme)
     else:
-        logger.info("Config file not found. Using default theme and settings.")
-        settings = {}; update_current_theme(DEFAULT_THEME)
+        logger.info("Using default theme.")
+        update_current_theme(DEFAULT_THEME) # Use default if loading failed or no theme was found
+
+    if not settings: # If file didn't exist or failed to load
+        logger.info("Config file not found or invalid. Using default theme and settings.")
+        settings = {} # Ensure settings is an empty dict if starting fresh
+
     return settings
 
+# --- MODIFIED: save_settings ---
 def save_settings(settings_dict):
-    # (save_settings remains the same as previous correction)
+    global ai_api_config # Ensure we access the global config
     try:
-        active_theme_dict = get_current_theme()
-        active_theme_name = active_theme_dict.get("name", DEFAULT_THEME["name"])
-        settings_dict['active_theme_name'] = active_theme_name
-        if 'theme' in settings_dict: del settings_dict['theme']
-        settings_dict['ai_api_config'] = { "provider": ai_api_config.get("provider"), "endpoint": ai_api_config.get("endpoint") }
-        logger.debug(f"Attempting to save settings dictionary to {CONFIG_FILE}.")
+        # --- Theme Saving: Save the entire current theme dictionary ---
+        current_theme_dict = get_current_theme()
+        settings_dict['active_theme_data'] = current_theme_dict
+        # Remove the old name-only key if it exists
+        settings_dict.pop('active_theme_name', None)
+        logger.debug(f"Saving active theme data for: '{current_theme_dict.get('name', 'Unnamed')}'")
+        # --- End Theme Saving ---
+
+        # --- AI Config Saving: Read from global ai_api_config ---
+        # Only save provider and endpoint. Key status is checked live.
+        settings_dict['ai_api_config'] = {
+            "provider": ai_api_config.get("provider"),
+            "endpoint": ai_api_config.get("endpoint")
+        }
+        logger.debug(f"Saving AI config: Provider={settings_dict['ai_api_config']['provider']}, Endpoint={settings_dict['ai_api_config']['endpoint']}")
+        # --- End AI Config Saving ---
+
+        logger.debug(f"Attempting to save full settings dictionary to {CONFIG_FILE}.")
+        # Log viewer settings being saved for confirmation
         viewer_settings_to_save = settings_dict.get('viewer_settings')
-        if viewer_settings_to_save: logger.debug(f"Viewer settings being saved: {viewer_settings_to_save}")
-        else: logger.debug("No viewer_settings key found in the dictionary to be saved.")
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(settings_dict, f, indent=4, ensure_ascii=False)
-        logger.info(f"Settings (including active theme name '{active_theme_name}') saved successfully to {CONFIG_FILE}.")
+        viewer_geom_to_save = settings_dict.get('TranslatedImageViewer')
+        if viewer_settings_to_save: logger.debug(f"Viewer style settings being saved: {viewer_settings_to_save}")
+        else: logger.debug("No viewer_settings (styles) key found in the dictionary to be saved.")
+        if viewer_geom_to_save: logger.debug(f"Viewer geometry settings being saved: {viewer_geom_to_save}")
+        else: logger.debug("No TranslatedImageViewer (geometry) key found in the dictionary to be saved.")
+
+
+        # Ensure the directory exists before writing
+        config_dir = os.path.dirname(CONFIG_FILE)
+        if not os.path.exists(config_dir):
+            try:
+                os.makedirs(config_dir)
+                logger.info(f"Created directory for config file: {config_dir}")
+            except OSError as e:
+                logger.error(f"Failed to create directory for config file '{config_dir}': {e}")
+                # Optionally raise the error or return False if saving is critical
+                return # Cannot save if directory fails
+
+        # Write the settings to the file
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings_dict, f, indent=4, ensure_ascii=False)
+
+        logger.info(f"Settings saved successfully to {CONFIG_FILE}.")
+
     except Exception as e:
         logger.error(f"Failed to save settings to {CONFIG_FILE}: {e}", exc_info=True)
-# ... (Keep generate_stylesheet and apply_theme functions) ...
+# --- END MODIFIED ---
 
 def generate_stylesheet(theme_colors):
     # (This function remains unchanged)
-    # ... (copy the function from the previous correct version) ...
     colors = theme_colors
     stylesheet_template = f"""
         QDialog, QMainWindow {{
@@ -424,28 +487,10 @@ def generate_stylesheet(theme_colors):
             opacity: 230;
         }}
         QDialog#LiveTranslationWindow {{
-             background-color: {colors.get('bg_groupbox', '#961E1E1E')};
-             border: 1px solid {colors.get('border_accent', '#FF00FFCC')};
-             border-radius: 8px;
-        }}
-        QLabel#LiveLabel {{
-             color: {colors.get('text_accent', '#FF00FFCC')};
-             background-color: transparent;
-             padding: 8px;
-             font-weight: normal;
-             border: none;
-        }}
-
-                /* --- ADDED Rule for Live Popout Window --- */
-        QDialog#LiveTranslationWindow {{
-             /* Use a semi-transparent version of the groupbox color */
              background-color: {QColor(colors.get('bg_groupbox', '#961E1E1E')).lighter(110).name(QColor.NameFormat.HexArgb)};
              border: 1px solid {colors.get('border_accent', '#FF00FFCC')};
              border-radius: 8px; /* Optional: Rounded corners */
         }}
-        /* --- END ADDED Rule --- */
-
-        /* Style for the label INSIDE the popout */
         QDialog#LiveTranslationWindow QLabel#LiveLabel {{
              color: {colors.get('text_accent', '#FF00FFCC')};
              background-color: transparent; /* Label itself is transparent */
@@ -485,61 +530,23 @@ def generate_stylesheet(theme_colors):
     """
     return stylesheet_template
 
-
 def apply_theme():
     # (This function remains unchanged)
-    # ... (copy the function from the previous correct version) ...
     try:
-        theme_data = get_current_theme() # Use the getter
+        theme_data = get_current_theme()
         if not isinstance(theme_data, dict) or "colors" not in theme_data:
             logger.error("Invalid theme structure found. Reverting to default.")
-            theme_data = DEFAULT_THEME
-            update_current_theme(theme_data) # Update central store
+            theme_data = DEFAULT_THEME; update_current_theme(theme_data)
 
         stylesheet = generate_stylesheet(theme_data["colors"])
         app_instance = QApplication.instance()
-        if app_instance:
-            app_instance.setStyleSheet(stylesheet)
-            logger.info(f"Applied theme: {theme_data.get('name', 'Unnamed')}")
-        else:
-            logger.warning("Cannot apply theme: No QApplication instance exists.")
+        if app_instance: app_instance.setStyleSheet(stylesheet); logger.info(f"Applied theme: {theme_data.get('name', 'Unnamed')}")
+        else: logger.warning("Cannot apply theme: No QApplication instance exists.")
     except Exception as e:
         logger.error(f"Failed to apply theme: {e}", exc_info=True)
         try:
              logger.warning("Attempting to apply default theme as fallback.")
              stylesheet = generate_stylesheet(DEFAULT_THEME["colors"])
              app_instance = QApplication.instance()
-             if app_instance:
-                 app_instance.setStyleSheet(stylesheet)
-                 logger.warning("Fell back to default theme due to error.")
-                 update_current_theme(DEFAULT_THEME) # Update central store
-        except Exception as fallback_e:
-             logger.error(f"Failed to apply even default theme: {fallback_e}")
-    """Applies the current_theme stylesheet to the application."""
-    try:
-        theme_data = get_current_theme() # Use the getter
-        if not isinstance(theme_data, dict) or "colors" not in theme_data:
-            logger.error("Invalid theme structure found. Reverting to default.")
-            theme_data = DEFAULT_THEME
-            update_current_theme(theme_data) # Update central store
-
-        stylesheet = generate_stylesheet(theme_data["colors"])
-        app_instance = QApplication.instance()
-        if app_instance:
-            app_instance.setStyleSheet(stylesheet)
-            logger.info(f"Applied theme: {theme_data.get('name', 'Unnamed')}")
-        else:
-            logger.warning("Cannot apply theme: No QApplication instance exists.")
-    except Exception as e:
-        logger.error(f"Failed to apply theme: {e}", exc_info=True)
-        # Fallback to default stylesheet if generation fails
-        try:
-             logger.warning("Attempting to apply default theme as fallback.")
-             stylesheet = generate_stylesheet(DEFAULT_THEME["colors"])
-             app_instance = QApplication.instance()
-             if app_instance:
-                 app_instance.setStyleSheet(stylesheet)
-                 logger.warning("Fell back to default theme due to error.")
-                 update_current_theme(DEFAULT_THEME) # Update central store
-        except Exception as fallback_e:
-             logger.error(f"Failed to apply even default theme: {fallback_e}")
+             if app_instance: app_instance.setStyleSheet(stylesheet); logger.warning("Fell back to default theme due to error."); update_current_theme(DEFAULT_THEME)
+        except Exception as fallback_e: logger.error(f"Failed to apply even default theme: {fallback_e}")
