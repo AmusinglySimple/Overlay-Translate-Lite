@@ -163,6 +163,78 @@ Overlay Translate is a powerful tool for capturing and translating on-screen tex
 - **Keyboard shortcuts not working?**  
   Make sure the app window is focused or check system settings for global hotkey conflicts.
 
+
+---
+
+## 🧩 How-To: Setting Up AI Providers
+
+Overlay Translate allows integration with AI models for translations and chat. Here's how to configure each provider:
+
+---
+
+### Setting API Points (Endpoints) for AI Providers
+
+1. Open **Overlay Translate**.
+2. Go to **Settings ➔ AI Configuration**.
+3. Choose your AI Provider:
+   - **OpenAI** ➔ Enter your API Key and set the endpoint (defaults to `https://api.openai.com/v1/`).
+   - **Ollama** ➔ Enter the local server endpoint (usually `http://127.0.0.1:11434`).
+   - **LM Studio** ➔ Only enter the API Key (must be exactly `lm-studio`).
+
+> ⚡ **Important for LM Studio:**  
+> The endpoint for LM Studio is hardcoded to `http://127.0.0.1:1234` inside Overlay Translate.  
+> You **only** need to enter the API Key (`lm-studio`). No custom endpoint is needed.
+
+---
+
+### Installing and Setting Up Ollama (Local AI Provider)
+
+**Installation:**
+- Windows/macOS: Install from [https://ollama.com/](https://ollama.com/)
+- Linux: Follow the instructions on the official website or GitHub.
+
+**After Installation:**
+- Start Ollama (it will automatically run the server at `http://127.0.0.1:11434`).
+
+**Download the llama3.2:1b Model:**
+```bash
+ollama run llama3.2-1b
+```
+- This model is specially configured for lower-end devices and is pre-optimized for use with Overlay Translate.
+
+---
+
+### Installing and Setting Up LM Studio
+
+**Installation:**
+- Download LM Studio from [https://lmstudio.ai/](https://lmstudio.ai/).
+
+**First Setup:**
+1. Launch LM Studio.
+2. Download a suitable model (for lightweight use, models like `llama3.2-1b` are recommended if available).
+3. Enable the **Local Server API** from the settings inside LM Studio.
+
+**Configuration inside Overlay Translate:**
+- **API Key:**  
+  Set the AI Key to:
+  ```
+  lm-studio
+  ```
+- **Endpoint:**  
+  ➔ **Already hardcoded** to `http://127.0.0.1:1234` — no need to configure it manually.
+
+> 💡 Ensure LM Studio is running whenever you want to use AI features through it.
+
+---
+
+## 📜 Quick Overview: Local AI Setup
+
+| Provider  | Install Source | What You Configure  | Default Endpoint          | Notes                     |
+|:--------- |:--------------- |:------------------- |:---------------------------|:-------------------------- |
+| **OpenAI**    | [openai.com](https://openai.com/) | API Key + Endpoint          | https://api.openai.com/v1/  | Cloud-based |
+| **Ollama**    | [ollama.com](https://ollama.com/) | Local Endpoint (default OK) | http://127.0.0.1:11434      | Pull llama3.2-1b model |
+| **LM Studio** | [lmstudio.ai](https://lmstudio.ai/) | API Key (`lm-studio`)        | Hardcoded: http://127.0.0.1:1234 | Just set API key |
+
 ---
 
 Overlay Translate is under active development — feedback and contributions are welcome!
