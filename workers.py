@@ -691,12 +691,18 @@ class AIStreamingWorker(QThread):
         client = None # Initialize client here for finally block
 
         try:
-            # Use simple lang codes for prompt
-            target_lang_name = self.target_language
+            lang_map = { "en": "English", "es": "Spanish", "fr": "French", "de": "German",
+                        "it": "Italian", "pt": "Portuguese", "ru": "Russian",
+                        "zh-cn": "Simplified Chinese", "zh": "Simplified Chinese",
+                        "ja": "Japanese", "ko": "Korean",
+                        "ch": "Chinese" }
+            target_lang_name = lang_map.get(self.target_language, self.target_language)
 
-            prompt = ( f"User: {self.message}\n"
-                       f"Assistant (concise response in {target_lang_name}):" )
-            logger.debug(f"AI Chat Prompt:\n---PROMPT START---\n{prompt}\n---PROMPT END---")
+            prompt = (
+                f"User: {self.message}\n"
+                f"Assistant (concise response in {target_lang_name}):"
+            )
+            logging.debug(f"AI Chat Prompt:\n---PROMPT START---\n{prompt}\n---PROMPT END---")
 
             headers = {"Content-Type": "application/json"}
             api_key = None
@@ -704,15 +710,19 @@ class AIStreamingWorker(QThread):
             if provider in ["OpenAI", "LM Studio"]:
                 try:
                     api_key = keyring.get_password("OverlayTranslate", provider)
-                    if api_key: headers["Authorization"] = f"Bearer {api_key}"
-                    elif provider == "OpenAI": raise ValueError(f"API key for {provider} not found.")
-                    else: logger.warning(f"API key for {provider} not found/provided, proceeding without.")
+                    if api_key:
+                        headers["Authorization"] = f"Bearer {api_key}"
+                    elif provider == "OpenAI":
+                        raise ValueError(f"API key for {provider} not found.")
+                    else:
+                        logging.warning(f"API key for {provider} not found/provided, proceeding without.")
                 except Exception as key_err:
                     raise ValueError(f"Failed to retrieve API key for {provider}: {key_err}")
 
             response = None
-            max_tokens = 1024 # Max tokens for chat response
+            max_tokens = 1024
             can_stream = True
+                        
             model_name = "gpt-4o-mini" # Default for OpenAI
 
             if provider == "OpenAI":
