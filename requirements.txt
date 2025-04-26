@@ -1,5 +1,8 @@
 # requirements.txt
 
+#Translation backend
+argostranslate
+
 # Core GUI Framework
 PySide6
 
