@@ -1,21 +1,28 @@
-# Core GUI and Application Logic
-PySide6
-requests
-keyring
+# requirements.txt
 
-# Image Processing and OCR
+# Core GUI Framework
+PySide6
+
+# Image Processing & OCR
 Pillow
 opencv-python
-numpy
-paddleocr
-paddlepaddle # Note: Install the correct version (CPU or GPU) for your system. See PaddlePaddle docs.
+pytesseract
+numpy # Often a dependency for Pillow/OpenCV
 
 # Language Detection
-langdetect-py
+langdetect
 
-# Backend Translation Server
+# HTTP Requests (Flask client, AI APIs)
+requests
+
+# Secure Key Storage
+keyring
+
+# System Resource Monitoring
+psutil
+
+# Local Translation Server (Assuming app.py uses Flask)
 Flask
-argostranslate
 
-# Optional: For AI Streaming (some providers like OpenAI/LMStudio)
+# Optional: For AI Streaming (if needed by provider)
 sseclient-py
