@@ -26,7 +26,7 @@ from utils.config import (
     logger, SUPPORT_FOLDER, ensure_support_folder, # Added SUPPORT_FOLDER, ensure_support_folder
     update_current_theme # <--- IMPORT update_current_theme HERE
 )
-from utils.helpers import apply_theme, choose_font_for_text, load_settings, get_system_font_path
+from utils.helpers import apply_theme, choose_font_for_text, load_settings, get_system_font_path, save_settings
 
 # Import from PIL needed for TranslatedImageViewer
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -597,109 +597,74 @@ class TranslatedImageViewer(QDialog):
         logger.debug(f"Initializing TranslatedImageViewer for: {os.path.basename(image_path)}")
         logger.debug(f"Target language for font: {target_language_code}, Initial size hint: {initial_font_size}")
 
-        # --- Load settings specifically for the viewer --- ## REVISED ##
+        # --- Load style settings specifically for the viewer ---
         vs = {}
         if self.control_window_ref and hasattr(self.control_window_ref, 'last_viewer_settings'):
             vs = self.control_window_ref.last_viewer_settings
-            if vs and isinstance(vs, dict):
-                logger.debug("Loaded viewer settings from ControlWindow reference.")
-            else:
-                 settings_from_file = load_settings()
-                 vs = settings_from_file.get('viewer_settings', {})
-                 logger.debug("Loaded viewer settings from file as fallback (ControlWindow had no/empty settings).")
-        else:
-             settings_from_file = load_settings()
-             vs = settings_from_file.get('viewer_settings', {})
-             logger.warning("ControlWindow ref not available/attribute missing, loaded viewer settings from file.")
-        # --- End Revised Load ---
+            if vs and isinstance(vs, dict): logger.debug("Loaded viewer style settings from ControlWindow reference.")
+            else: vs = load_settings().get('viewer_settings', {}); logger.debug("Loaded viewer style settings from file (ControlWindow had none).")
+        else: vs = load_settings().get('viewer_settings', {}); logger.warning("ControlWindow ref missing, loaded viewer style settings from file.")
 
-        # --- Use loaded settings (vs) with defaults ---
-        default_font_color_tuple = (0, 0, 255, 255) # Blue default
-        default_bg_outer_tuple = (0, 0, 0, 180)     # Darker semi-transparent default BG
-
+        # --- Use loaded style settings (vs) with defaults ---
+        default_font_color_tuple = (255, 255, 255, 255); default_bg_outer_tuple = (0, 0, 0, 200)
         font_color_val = vs.get('font_color', default_font_color_tuple)
-        if isinstance(font_color_val, (list, tuple)) and len(font_color_val) == 4:
-            font_color_tuple = tuple(font_color_val)
-        else:
-            font_color_tuple = default_font_color_tuple
-
+        font_color_tuple = tuple(font_color_val) if isinstance(font_color_val, (list, tuple)) and len(font_color_val) == 4 else default_font_color_tuple
         bg_outer_val = vs.get('bg_color_outer', default_bg_outer_tuple)
-        if isinstance(bg_outer_val, (list, tuple)) and len(bg_outer_val) == 4:
-            bg_outer_tuple = tuple(bg_outer_val)
-        else:
-            bg_outer_tuple = default_bg_outer_tuple
-
-        try:
-             self.font_color = QColor(*font_color_tuple)
-             if not self.font_color.isValid(): raise ValueError("Invalid QColor from tuple")
-        except (TypeError, ValueError, IndexError) as e:
-             logger.warning(f"Invalid saved font color {font_color_tuple} (Error: {e}). Using default.")
-             self.font_color = QColor(*default_font_color_tuple)
-
-        try:
-             self.bg_color_outer = QColor(*bg_outer_tuple)
-             if not self.bg_color_outer.isValid(): raise ValueError("Invalid QColor from tuple")
-        except (TypeError, ValueError, IndexError) as e:
-             logger.warning(f"Invalid saved BG color {bg_outer_tuple} (Error: {e}). Using default.")
-             self.bg_color_outer = QColor(*default_bg_outer_tuple)
-        # --- End Color Loading ---
-
-        h, s, v, a = self.bg_color_outer.getHsvF()
-        new_v_inner = max(0, v * 0.9)
-        new_a_inner = min(255, int(self.bg_color_outer.alpha() * 0.9))
+        bg_outer_tuple = tuple(bg_outer_val) if isinstance(bg_outer_val, (list, tuple)) and len(bg_outer_val) == 4 else default_bg_outer_tuple
+        try: self.font_color = QColor(*font_color_tuple); assert self.font_color.isValid()
+        except: logger.warning(f"Invalid saved font color {font_color_tuple}. Using default."); self.font_color = QColor(*default_font_color_tuple)
+        try: self.bg_color_outer = QColor(*bg_outer_tuple); assert self.bg_color_outer.isValid()
+        except: logger.warning(f"Invalid saved BG color {bg_outer_tuple}. Using default."); self.bg_color_outer = QColor(*default_bg_outer_tuple)
+        h, s, v, a = self.bg_color_outer.getHsvF(); new_v_inner = max(0, v * 0.9); new_a_inner = min(255, int(self.bg_color_outer.alpha() * 0.9))
         self.bg_color_inner = QColor.fromHsvF(h, s, new_v_inner, new_a_inner / 255.0)
-
-        # --- Load font path and size ---
-        saved_font_path = vs.get('font_path')
-        saved_font_size = vs.get('font_size')
-
+        saved_font_path = vs.get('font_path'); saved_font_size = vs.get('font_size')
         if saved_font_path and isinstance(saved_font_size, int) and os.path.exists(saved_font_path):
-            self.font_path = saved_font_path
-            self.font_size = saved_font_size
-            logger.info(f"Using saved viewer font: {self.font_path}, Size: {self.font_size}")
+            self.font_path = saved_font_path; self.font_size = saved_font_size; logger.info(f"Using saved viewer font: {self.font_path}, Size: {self.font_size}")
         else:
-            if saved_font_path or saved_font_size:
-                 logger.warning(f"Saved viewer font path '{saved_font_path}' or size '{saved_font_size}' invalid/missing. Determining new font.")
-            else:
-                 logger.info("No valid viewer font settings saved. Determining new font.")
-
-            self.font_path = get_system_font_path(self.target_language_code)
-            self.font_size = initial_font_size
-
+            if saved_font_path or saved_font_size: logger.warning(f"Saved viewer font path/size invalid. Determining new font.")
+            else: logger.info("No valid viewer font settings saved. Determining new font.")
+            self.font_path = get_system_font_path(self.target_language_code); self.font_size = initial_font_size
             if not self.font_path or not os.path.exists(self.font_path):
-                logger.warning(f"Determined font path '{self.font_path}' for lang '{self.target_language_code}' not found. Using absolute default.")
-                self.font_path = get_system_font_path("default")
+                logger.warning(f"Determined font path '{self.font_path}' invalid. Using default."); self.font_path = get_system_font_path("default")
             logger.info(f"Using determined font: {self.font_path}, Size: {self.font_size}")
-        # --- End Font Load ---
 
-        try:
-            self.original_image = Image.open(image_path).convert("RGBA")
+        try: self.original_image = Image.open(image_path).convert("RGBA")
         except Exception as e:
-            logger.error(f"Failed to load image '{image_path}' for viewer: {e}", exc_info=True)
-            QMessageBox.critical(self, "Image Load Error", f"Failed to load image:\n{e}")
-            self.save_on_close = False
-            QTimer.singleShot(0, self.reject)
-            return
+            logger.error(f"Failed to load image '{image_path}' for viewer: {e}", exc_info=True); QMessageBox.critical(self, "Image Load Error", f"Failed to load image:\n{e}")
+            self.save_on_close = False; QTimer.singleShot(0, self.reject); return
 
         if len(self.translated_lines) != len(self.boxes):
-             logger.warning(f"Viewer line/box mismatch ({len(self.translated_lines)} lines vs {len(self.boxes)} boxes). Padding/truncating lines.")
+             logger.warning(f"Viewer line/box mismatch ({len(self.translated_lines)}/{len(self.boxes)}). Padding/truncating.")
              diff = len(self.boxes) - len(self.translated_lines)
              if diff > 0: self.translated_lines.extend([""] * diff)
              else: self.translated_lines = self.translated_lines[:len(self.boxes)]
 
         self.setWindowTitle("Translated Image Viewer")
         self.setMinimumSize(600, 500)
-        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint |
-                             Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint |
-                             Qt.WindowMaximizeButtonHint)
+        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
 
         self.initUI()
         self.renderTranslatedImage()
         self.updateImageDisplay()
 
-        settings_for_geom = load_settings()
-        self.load_viewer_geometry(settings_for_geom)
-
+        # --- Load Geometry --- Moved from control_window.py ---
+        settings_for_geom = load_settings() # Load full settings to get geometry
+        if 'TranslatedImageViewer' in settings_for_geom:
+            try:
+                geo = settings_for_geom['TranslatedImageViewer']
+                if all(k in geo for k in ('x', 'y', 'width', 'height')):
+                    self.setGeometry(int(geo['x']), int(geo['y']), int(geo['width']), int(geo['height']))
+                    logger.debug(f"Loaded viewer geometry: {geo}")
+                else:
+                    logger.warning("Incomplete viewer geometry found. Using default size.")
+                    self.resize(700, 550) # Default size
+            except (ValueError, TypeError, KeyError) as e:
+                logger.error(f"Error loading viewer geometry: {e}. Using default size.")
+                self.resize(700, 550)
+        else:
+            logger.debug("No viewer geometry found. Using default size.")
+            self.resize(700, 550) # Default size if key missing
+        # --- End Load Geometry ---
 
     def initUI(self):
         main_layout = QVBoxLayout(self)
@@ -897,63 +862,6 @@ class TranslatedImageViewer(QDialog):
             self.renderTranslatedImage()
             self.updateImageDisplay()
 
-    def resetStyles(self):
-        # Note: This method is now only callable programmatically,
-        # as the Reset button has been removed.
-        logger.debug("Resetting viewer styles.")
-        # Define defaults directly here
-        default_font_color_tuple = (0, 0, 255, 255) # Blue default
-        default_bg_outer_tuple = (0, 0, 0, 180)     # Dark semi-transparent default BG
-
-        self.font_color = QColor(*default_font_color_tuple)
-        self.bg_color_outer = QColor(*default_bg_outer_tuple)
-        h, s, v, a = self.bg_color_outer.getHsvF()
-        new_v_inner = max(0, v * 0.9); new_a_inner = min(255, int(self.bg_color_outer.alpha() * 0.9))
-        self.bg_color_inner = QColor.fromHsvF(h, s, new_v_inner, new_a_inner / 255.0)
-
-        # Update color pickers
-        self.font_color_picker.setColor(self.font_color)
-        self.bg_color_picker.setColor(self.bg_color_outer)
-
-        # Reset font and size
-        parent_initial_size = 20 # Default default
-        if self.control_window_ref and hasattr(self.control_window_ref, 'default_font_size'):
-            try:
-                parent_initial_size = int(self.control_window_ref.default_font_size)
-            except (ValueError, TypeError):
-                logger.warning("Control window default_font_size invalid, using 20.")
-                parent_initial_size = 20
-
-        self.font_path = get_system_font_path(self.target_language_code)
-        self.font_size = parent_initial_size
-        if not self.font_path or not os.path.exists(self.font_path):
-             logger.warning(f"Could not find font for {self.target_language_code} on reset, using default.")
-             self.font_path = get_system_font_path("default")
-
-        logger.info(f"Resetting font to language/default: {self.font_path}, Size: {self.font_size}")
-
-        # Update font UI elements
-        self.font_size_slider.setValue(self.font_size)
-        self.font_size_value_label.setText(f"{self.font_size}pt")
-
-        # Find the corresponding display name for the reset font path
-        default_display_font = next((name for name, path in self.font_family_to_path.items() if path and self.font_path and path.lower() == self.font_path.lower()), None)
-        if default_display_font:
-             self.font_combo.blockSignals(True)
-             self.font_combo.setCurrentText(default_display_font)
-             self.font_combo.blockSignals(False)
-        else:
-             logger.warning(f"Could not find display name for reset font path '{self.font_path}' in combo box.")
-             # Optional: Set to index 0 if available
-             if self.font_combo.count() > 0:
-                 self.font_combo.blockSignals(True)
-                 self.font_combo.setCurrentIndex(0)
-                 self.font_combo.blockSignals(False)
-                 self.updateFont(self.font_combo.currentText()) # Manually trigger update
-
-        # Re-render
-        self.renderTranslatedImage()
-        self.updateImageDisplay()
 
     def renderTranslatedImage(self):
         if not self.original_image:
@@ -1201,10 +1109,10 @@ class TranslatedImageViewer(QDialog):
              logger.warning("Auto-save skipped: No rendered image available.")
 
     def get_viewer_settings(self):
-        """Returns the current style settings."""
+        # (This method remains the same)
         settings = {
-            'font_color': list(self.font_color.getRgb()), # Store as list [R, G, B, A]
-            'bg_color_outer': list(self.bg_color_outer.getRgb()), # Store as list [R, G, B, A]
+            'font_color': list(self.font_color.getRgb()),
+            'bg_color_outer': list(self.bg_color_outer.getRgb()),
             'font_path': self.font_path,
             'font_size': self.font_size
         }
@@ -1212,69 +1120,44 @@ class TranslatedImageViewer(QDialog):
         return settings
 
     def get_geometry_settings(self):
-        """Returns the current window geometry."""
+        # (This method remains the same)
         return { 'x': self.x(), 'y': self.y(), 'width': self.width(), 'height': self.height() }
-
-    def load_viewer_geometry(self, settings):
-        """Loads window geometry from settings if available."""
-        if 'TranslatedImageViewer' in settings:
-            try:
-                geo = settings['TranslatedImageViewer']
-                # Basic validation
-                if isinstance(geo, dict) and all(k in geo for k in ('x', 'y', 'width', 'height')):
-                    # Ensure values are integers
-                    x = int(geo['x'])
-                    y = int(geo['y'])
-                    w = int(geo['width'])
-                    h = int(geo['height'])
-                    # Basic sanity check on size (optional)
-                    if w > 50 and h > 50:
-                        self.setGeometry(x, y, w, h)
-                        logger.debug(f"Loaded viewer geometry: x={x}, y={y}, w={w}, h={h}")
-                    else:
-                        logger.warning(f"Ignoring loaded geometry due to small size: w={w}, h={h}")
-                else:
-                    logger.warning("Invalid format for 'TranslatedImageViewer' geometry settings.")
-            except (ValueError, TypeError, KeyError) as e:
-                logger.error(f"Error loading viewer geometry: {e}.")
-        else:
-            logger.debug("No 'TranslatedImageViewer' geometry found in settings.")
 
 
     def closeEvent(self, event):
-        """Override close event ONLY to save image automatically."""
-        # This is triggered by the 'X' button or Alt+F4 etc.
-        # REMOVED settings update from here in this version.
-        logger.debug("TranslatedImageViewer closeEvent triggered (image save only).")
+        """Override close event to save styles, geometry, and image."""
+        logger.debug("TranslatedImageViewer closeEvent triggered.")
+        # --- Update style settings in ControlWindow ---
+        if self.control_window_ref and hasattr(self.control_window_ref, 'update_last_viewer_settings'):
+            current_style_settings = self.get_viewer_settings()
+            self.control_window_ref.update_last_viewer_settings(current_style_settings)
+            logger.debug("Updated ControlWindow's last viewer style settings.")
+        else:
+            logger.warning("Could not update last viewer style settings: ControlWindow reference missing.")
+        # --- End Update Style Settings ---
+
+        # --- Auto-save image ---
         self.auto_save_image()
-        # Proceed with the default close behavior (which usually rejects the dialog)
-        super().closeEvent(event)
+        # --- End Auto-save ---
+
+        # --- Note: Geometry saving happens centrally in ControlWindow.gather_current_state ---
+        # No need to save geometry directly here, but it's captured when the main app saves.
+
+        super().closeEvent(event) # Proceed with closing
 
     def accept(self):
-        """Update settings in ControlWindow before accepting."""
-        # This is triggered by the (now removed) "Close" button, or programmatically.
-        logger.debug("TranslatedImageViewer accepted (closed).")
-        # --- Save settings back to the control window ---
-        if self.control_window_ref and hasattr(self.control_window_ref, 'update_last_viewer_settings'):
-            current_settings = self.get_viewer_settings()
-            logger.debug("Calling control_window_ref.update_last_viewer_settings from accept()...")
-            self.control_window_ref.update_last_viewer_settings(current_settings)
-            logger.debug("Finished call to control_window_ref.update_last_viewer_settings from accept().")
-        else:
-            logger.warning("Could not update last viewer settings from accept(): ControlWindow reference or method missing.")
-        # --- End settings save ---
-        # closeEvent will still be called implicitly after accept() to handle image saving
-        # when the dialog actually closes
-        super().accept() # Call the original accept method
+        """Handle OK/Close button press."""
+        logger.debug("TranslatedImageViewer accepted (Close button).")
+        # Settings are now saved via closeEvent, just accept the dialog.
+        super().accept() # Call the original accept method (which triggers closeEvent)
 
+    # --- MODIFIED reject ---
     def reject(self):
-        """Handle dialog rejection (e.g., Esc, 'X' button via closeEvent)."""
-        # This is triggered by Esc key, or by closeEvent if not overridden to accept.
-        logger.debug("TranslatedImageViewer rejected (closed).")
-        # Settings are NOT updated on rejection by default in this version.
-        # Image saving is handled by closeEvent which happens before/during rejection.
-        super().reject() # Call the original reject method
-
+        """Handle dialog rejection (e.g., Esc, 'X' button)."""
+        logger.debug("TranslatedImageViewer rejected (Esc/'X').")
+        # Settings are now saved via closeEvent, just reject the dialog.
+        super().reject() # Call the original reject method (which triggers closeEvent)
+        
 # --- Example Usage (requires a valid image path) ---
 if __name__ == '__main__':
     import sys
