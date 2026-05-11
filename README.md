@@ -2,6 +2,12 @@
 
 A lightweight version of Overlay Translate (to be released)  — screen OCR and translation with overlay display.
 
+## 📥 Download
+**Get the latest executable for Windows here:**
+[**Download Latest Release (v1.0.0-lite)**](https://github.com/AmusinglySimple/Overlay-Translate-Lite/releases/latest)
+
+---
+
 [!IMPORTANT]
 Special thanks to my friend and collaborator Kappuchuu for his invaluable help with testing and quality assurance during the development of this software.
 
