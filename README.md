@@ -2,6 +2,9 @@
 
 A lightweight version of Overlay Translate — screen OCR and translation with overlay display.
 
+[!IMPORTANT]
+Special thanks to my friend and collaborator Kappuchuu for his invaluable help with testing and quality assurance during the development of this software.
+
 ## What's Included
 
 - **Screen Capture** (F1) — Capture the overlay area and translate text
