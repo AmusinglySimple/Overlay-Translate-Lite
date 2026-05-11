@@ -69,3 +69,12 @@ Special thanks to my friend and collaborator Kappuchuu for his invaluable help w
 - Python >= 3.9
 - PySide6, PaddleOCR, Argos Translate, Flask, Waitress
 - See `requirements.txt` for full list
+
+## ☕ Support
+If you find this tool useful and want to support its development, please consider buying me a coffee!
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/acid.reasons)
+
+## Credits & Thanks
+*   **Main Developer:** [Andrea Sisco]
+*   **Testing & QA:** A huge shoutout to **kappuchuu** for the extensive testing and feedback.
