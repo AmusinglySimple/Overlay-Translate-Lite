@@ -1,0 +1,61 @@
+# OverlayTranslate Lite - Production Requirements
+# Stripped version: No AI providers, no chat, no complex features
+# Python Version: >=3.9
+#
+# To install: pip install -r requirements.txt
+
+# ============================================================================
+# GUI Framework (Qt6)
+# ============================================================================
+PySide6==6.6.3.1                  # Qt6 Python bindings for GUI
+PySide6-Essentials==6.6.3.1       # Essential Qt6 modules
+PySide6-Addons==6.6.3.1           # Additional Qt6 widgets
+
+# ============================================================================
+# OCR Engine (PaddleOCR)
+# ============================================================================
+paddleocr==2.9.1                  # PaddleOCR for text recognition
+paddlepaddle==2.6.2               # PaddlePaddle deep learning framework (CPU)
+# Note: For GPU support, use: paddlepaddle-gpu==2.6.2
+
+# ============================================================================
+# Image Processing
+# ============================================================================
+Pillow==10.4.0                    # Image manipulation (PIL)
+opencv-python==4.12.0.88          # Computer vision library
+numpy==1.24.4                     # Numerical computing (constrained by paddlepaddle 2.6.x)
+
+# ============================================================================
+# Web Framework (Flask Server)
+# ============================================================================
+Flask==2.2.5                      # Web framework for API server
+waitress==2.1.2                   # Production WSGI server
+Werkzeug==3.0.6                   # WSGI utilities (Flask dependency)
+Jinja2==3.1.6                     # Template engine (Flask dependency)
+MarkupSafe==2.1.5                 # Safe string handling (Jinja2 dependency)
+click==8.1.8                      # CLI framework (Flask dependency)
+itsdangerous==2.2.0               # Secure data signing (Flask dependency)
+
+# ============================================================================
+# HTTP Client
+# ============================================================================
+requests==2.31.0                  # HTTP library for server readiness checks
+urllib3==2.2.3                    # HTTP client (requests dependency)
+certifi>=2024.2.2                 # Root certificates (requests dependency)
+charset-normalizer==3.4.3         # Character encoding detection (requests dependency)
+idna==3.10                        # Internationalized domain names (requests dependency)
+
+# ============================================================================
+# Translation Engine
+# ============================================================================
+argostranslate==1.9.6             # Offline translation engine
+langdetect==1.0.9                 # Language detection
+
+# ============================================================================
+# Notes
+# ============================================================================
+# 1. PaddleOCR requires paddlepaddle (CPU) or paddlepaddle-gpu (GPU with CUDA)
+# 2. For GPU support: pip uninstall paddlepaddle && pip install paddlepaddle-gpu
+# 3. Windows users need Visual C++ Redistributable for opencv-python
+# 4. Removed from full version: sseclient-py, keyring, pywin32-ctypes,
+#    markdown, Pygments, psutil (not needed for Lite)
