@@ -1,6 +1,6 @@
 # Overlay Translate Lite
 
-A lightweight version of Overlay Translate — screen OCR and translation with overlay display.
+A lightweight version of Overlay Translate (to be released)  — screen OCR and translation with overlay display.
 
 [!IMPORTANT]
 Special thanks to my friend and collaborator Kappuchuu for his invaluable help with testing and quality assurance during the development of this software.
